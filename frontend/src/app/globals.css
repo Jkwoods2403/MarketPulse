@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+/*
+ * Market Pulse design tokens: dark-first institutional terminal theme.
+ * Use these semantic tokens (bg-panel, text-muted, text-up, ...) instead of raw colors,
+ * so the whole interface can be re-tuned in one place.
+ */
+@theme {
+  /* Surfaces */
+  --color-canvas: #0a0d10;
+  --color-panel: #10151a;
+  --color-panel-raised: #161c23;
+  --color-border: #222a33;
+  --color-border-strong: #2f3a46;
+
+  /* Text */
+  --color-fg: #dbe2ea;
+  --color-muted: #8794a3;
+  --color-faint: #56616d;
+
+  /* Accent and semantic market colors */
+  --color-accent: #4aa8ff;
+  --color-up: #22b07d;
+  --color-down: #ef5a5a;
+
+  /* Data status colors (CLAUDE.md §3: label live / delayed / stale / unavailable) */
+  --color-status-live: #22b07d;
+  --color-status-delayed: #e0a33a;
+  --color-status-stale: #e07b3a;
+  --color-status-unavailable: #8794a3;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: var(--color-canvas);
+  color: var(--color-fg);
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.45;
+  /* Fixed-width digits so columns of prices align. */
+  font-variant-numeric: tabular-nums;
+}
