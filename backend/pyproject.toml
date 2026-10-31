@@ -1,0 +1,120 @@
+[project]
+name = "marketpulse"
+version = "0.1.0"
+description = "Market Pulse backend: data ingestion, API, and quantitative analytics for energy-focused market intelligence."
+authors = [{ name = "Jacob Woods" }]
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.162.0",
+    "pydantic>=2.14.2",
+    "pydantic-settings>=2.16.2",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[project.scripts]
+marketpulse = "marketpulse.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.16.0",
+    "import-linter>=2.15",
+    "mypy>=2.4.1",
+    "pytest>=9.2.0",
+    "ruff>=0.17.3",
+]
+
+# --- Ruff (lint + format) ------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "B",        # bugbear
+    "UP",       # pyupgrade
+    "N",        # pep8-naming
+    "S",        # bandit (security)
+    "DTZ",      # timezone-naive datetimes (critical for market data)
+    "SIM",      # simplify
+    "RUF",      # ruff-specific
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]  # assert is expected in tests
+
+# --- mypy -------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.13"
+strict = true
+mypy_path = "src"
+packages = ["marketpulse"]
+plugins = ["pydantic.mypy"]
+
+# --- pytest -------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+
+# --- import-linter: enforced module boundaries (ADR-0002) ---------------------------
+[tool.importlinter]
+root_package = "marketpulse"
+
+[[tool.importlinter.contracts]]
+name = "core is independent of all other modules"
+type = "forbidden"
+source_modules = ["marketpulse.core"]
+forbidden_modules = [
+    "marketpulse.db", "marketpulse.sources", "marketpulse.ingestion",
+    "marketpulse.api", "marketpulse.analytics", "marketpulse.content",
+]
+
+[[tool.importlinter.contracts]]
+name = "db depends only on core"
+type = "forbidden"
+source_modules = ["marketpulse.db"]
+forbidden_modules = [
+    "marketpulse.sources", "marketpulse.ingestion", "marketpulse.api",
+    "marketpulse.analytics", "marketpulse.content",
+]
+
+[[tool.importlinter.contracts]]
+name = "sources (provider clients) depend only on core"
+type = "forbidden"
+source_modules = ["marketpulse.sources"]
+forbidden_modules = [
+    "marketpulse.db", "marketpulse.ingestion", "marketpulse.api",
+    "marketpulse.analytics", "marketpulse.content",
+]
+
+[[tool.importlinter.contracts]]
+name = "ingestion does not depend on api or analytics"
+type = "forbidden"
+source_modules = ["marketpulse.ingestion"]
+forbidden_modules = ["marketpulse.api", "marketpulse.analytics"]
+
+[[tool.importlinter.contracts]]
+name = "analytics never fetches from providers or depends on the api"
+type = "forbidden"
+source_modules = ["marketpulse.analytics"]
+forbidden_modules = ["marketpulse.sources", "marketpulse.ingestion", "marketpulse.api"]
+
+[[tool.importlinter.contracts]]
+name = "content does not depend on the api"
+type = "forbidden"
+source_modules = ["marketpulse.content"]
+forbidden_modules = ["marketpulse.api"]
+
+[[tool.importlinter.contracts]]
+name = "api reads from the database only, never from providers"
+type = "forbidden"
+source_modules = ["marketpulse.api"]
+forbidden_modules = ["marketpulse.sources", "marketpulse.ingestion"]
