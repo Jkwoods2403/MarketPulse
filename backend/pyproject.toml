@@ -6,9 +6,12 @@ authors = [{ name = "Jacob Woods" }]
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "alembic>=1.20.1",
     "fastapi>=0.162.0",
+    "psycopg[binary]>=3.3.6",
     "pydantic>=2.14.2",
     "pydantic-settings>=2.16.2",
+    "sqlalchemy>=2.1.6",
     "uvicorn[standard]>=0.54.0",
 ]
 
@@ -63,6 +66,9 @@ plugins = ["pydantic.mypy"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+markers = [
+    "db: needs PostgreSQL (skipped if unreachable, required in CI via MARKETPULSE_REQUIRE_DB=1)",
+]
 
 # --- import-linter: enforced module boundaries (ADR-0002) ---------------------------
 [tool.importlinter]

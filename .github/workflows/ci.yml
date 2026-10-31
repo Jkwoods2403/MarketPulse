@@ -19,6 +19,27 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: marketpulse
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: marketpulse
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U marketpulse -d marketpulse"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # CI-only credentials for the throwaway service container above (not secrets).
+      POSTGRES_USER: marketpulse
+      POSTGRES_PASSWORD: ci-only-password
+      POSTGRES_DB: marketpulse
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      # Database tests must run in CI; never skip them silently.
+      MARKETPULSE_REQUIRE_DB: "1"
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v6

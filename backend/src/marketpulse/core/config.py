@@ -7,6 +7,7 @@ Values come from the process environment first, then from the repository-root `.
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -46,11 +47,17 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
-        """SQLAlchemy URL for the psycopg driver. Contains the password; never log it."""
-        password = self.postgres_password.get_secret_value()
+        """SQLAlchemy URL for the configured database. Contains the password; never log it."""
+        return self.database_url_for(None)
+
+    def database_url_for(self, database: str | None) -> str:
+        """SQLAlchemy URL (psycopg driver) for `database`, defaulting to POSTGRES_DB."""
+        user = quote(self.postgres_user, safe="")
+        password = quote(self.postgres_password.get_secret_value(), safe="")
+        name = database or self.postgres_db
         return (
-            f"postgresql+psycopg://{self.postgres_user}:{password}"
-            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+            f"postgresql+psycopg://{user}:{password}"
+            f"@{self.postgres_host}:{self.postgres_port}/{name}"
         )
 
 
