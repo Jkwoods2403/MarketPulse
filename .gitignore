@@ -1,0 +1,82 @@
+# =============================================================================
+# Market Pulse .gitignore
+# Goal: secrets, local databases, raw data, and environment files never reach GitHub.
+# =============================================================================
+
+# --- Secrets & environment files ---------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials*.json
+service-account*.json
+
+# --- Data (raw payloads, exports, local databases) ---------------------------
+/data/*
+!/data/README.md
+*.sqlite
+*.sqlite3
+*.db
+*.duckdb
+*.duckdb.wal
+*.dump
+*.sql.gz
+*.parquet
+*.feather
+pgdata/
+postgres-data/
+
+# --- Python --------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.import_linter_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# --- Jupyter -------------------------------------------------------------------
+.ipynb_checkpoints/
+# Notebook outputs may embed licensed or large data; commit notebooks with outputs cleared.
+
+# --- Node / Next.js --------------------------------------------------------------
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+.vercel/
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- Logs ------------------------------------------------------------------------
+logs/
+*.log
+
+# --- Editors & OS ---------------------------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Claude Code local settings ---------------------------------------------------
+.claude/settings.local.json
