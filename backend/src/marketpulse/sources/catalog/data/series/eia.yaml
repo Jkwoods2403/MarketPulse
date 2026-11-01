@@ -1,0 +1,181 @@
+# EIA series. Each entry was verified against its official EIA page (reference_url):
+# title (used verbatim as `name`), units, frequency, and the original data source from EIA's
+# "Definitions, Sources and Explanatory Notes" page for the series' table.
+#
+# source_series_id is EIA's APIv1-style ID (CATEGORY.SERIES.FREQ), which EIA APIv2 accepts via
+# its seriesid route. Seasonal adjustment is left unset because EIA does not state it on these
+# pages.
+#
+# max_staleness_days = the largest expected age of the latest period's end date just before
+# the next scheduled release, plus a small buffer (checked against EIA release dates).
+
+source: eia
+verified_on: 2026-11-01
+
+series:
+  # --- Spot prices (daily values, published weekly by EIA) -------------------------------
+  - code: wti_spot
+    source_series_id: PET.RWTC.D
+    name: Cushing, OK WTI Spot Price FOB
+    category: crude_oil
+    frequency: daily
+    period_convention: business_day
+    units: Dollars per Barrel
+    original_source: Refinitiv, an LSEG business
+    reference_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=RWTC&f=D
+    license_override: attribution_required
+    max_staleness_days: 14
+    notes: >-
+      Third-party data (Refinitiv, an LSEG business) republished by EIA; confirm redistribution
+      rights before any public deployment. Daily values are released weekly (Wednesdays), so
+      the latest value can legitimately be up to ~12 days old.
+
+  - code: brent_spot
+    source_series_id: PET.RBRTE.D
+    name: Europe Brent Spot Price FOB
+    category: crude_oil
+    frequency: daily
+    period_convention: business_day
+    units: Dollars per Barrel
+    original_source: Refinitiv, an LSEG business
+    reference_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=RBRTE&f=D
+    license_override: attribution_required
+    max_staleness_days: 14
+    notes: >-
+      Third-party data (Refinitiv, an LSEG business) republished by EIA; confirm redistribution
+      rights before any public deployment. Daily values are released weekly (Wednesdays).
+
+  - code: henry_hub_spot
+    source_series_id: NG.RNGWHHD.D
+    name: Henry Hub Natural Gas Spot Price
+    category: natural_gas
+    frequency: daily
+    period_convention: business_day
+    units: Dollars per Million Btu
+    original_source: Refinitiv, an LSEG business
+    reference_url: https://www.eia.gov/dnav/ng/hist/rngwhhdD.htm
+    license_override: attribution_required
+    max_staleness_days: 14
+    notes: >-
+      Third-party data (Refinitiv, an LSEG business) republished by EIA; confirm redistribution
+      rights before any public deployment. Daily values are released weekly (Wednesdays).
+
+  # --- Weekly petroleum supply (weeks ending Friday) -------------------------------------
+  - code: us_crude_stocks_ex_spr
+    source_series_id: PET.WCESTUS1.W
+    name: Weekly U.S. Ending Stocks excluding SPR of Crude Oil
+    category: crude_oil
+    frequency: weekly
+    period_convention: week_ending_friday
+    units: Thousand Barrels
+    original_source: U.S. Energy Information Administration
+    reference_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WCESTUS1&f=W
+    max_staleness_days: 14
+    notes: EIA weekly petroleum surveys (Forms EIA-800 to EIA-805, EIA-809).
+
+  - code: us_crude_stocks_spr
+    source_series_id: PET.WCSSTUS1.W
+    name: Weekly U.S. Ending Stocks of Crude Oil in SPR
+    category: crude_oil
+    frequency: weekly
+    period_convention: week_ending_friday
+    units: Thousand Barrels
+    original_source: U.S. Energy Information Administration
+    reference_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WCSSTUS1&f=W
+    max_staleness_days: 14
+    notes: EIA weekly petroleum surveys (Forms EIA-800 to EIA-805, EIA-809).
+
+  - code: us_crude_production
+    source_series_id: PET.WCRFPUS2.W
+    name: Weekly U.S. Field Production of Crude Oil
+    category: crude_oil
+    frequency: weekly
+    period_convention: week_ending_friday
+    units: Thousand Barrels per Day
+    original_source: U.S. Energy Information Administration
+    reference_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WCRFPUS2&f=W
+    max_staleness_days: 14
+    notes: Listed in EIA's Weekly Supply Estimates table (Forms EIA-800 to EIA-805, EIA-809).
+
+  - code: us_refinery_utilization
+    source_series_id: PET.WPULEUS3.W
+    name: Weekly U.S. Percent Utilization of Refinery Operable Capacity
+    category: refining
+    frequency: weekly
+    period_convention: week_ending_friday
+    units: Percent
+    original_source: U.S. Energy Information Administration
+    reference_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WPULEUS3&f=W
+    max_staleness_days: 14
+    notes: >-
+      Form EIA-800 "Weekly Refinery Report"; operable capacity is based on the most recent
+      month of EIA's Refinery Utilization and Capacity data.
+
+  - code: us_gasoline_stocks
+    source_series_id: PET.WGTSTUS1.W
+    name: Weekly U.S. Ending Stocks of Total Gasoline
+    category: refined_products
+    frequency: weekly
+    period_convention: week_ending_friday
+    units: Thousand Barrels
+    original_source: U.S. Energy Information Administration
+    reference_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WGTSTUS1&f=W
+    max_staleness_days: 14
+    notes: EIA weekly petroleum surveys (Forms EIA-800 to EIA-803, EIA-809).
+
+  - code: us_distillate_stocks
+    source_series_id: PET.WDISTUS1.W
+    name: Weekly U.S. Ending Stocks of Distillate Fuel Oil
+    category: refined_products
+    frequency: weekly
+    period_convention: week_ending_friday
+    units: Thousand Barrels
+    original_source: U.S. Energy Information Administration
+    reference_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WDISTUS1&f=W
+    max_staleness_days: 14
+    notes: EIA weekly petroleum surveys (Forms EIA-800 to EIA-803, EIA-809).
+
+  # --- Natural gas ------------------------------------------------------------------------
+  - code: l48_gas_storage
+    source_series_id: NG.NW2_EPG0_SWO_R48_BCF.W
+    name: Lower 48 States Natural Gas Working Underground Storage
+    category: natural_gas
+    frequency: weekly
+    period_convention: week_ending_friday
+    units: Billion Cubic Feet
+    original_source: U.S. Energy Information Administration
+    reference_url: https://www.eia.gov/dnav/ng/hist/nw2_epg0_swo_r48_bcfw.htm
+    max_staleness_days: 14
+    notes: >-
+      Form EIA-912 "Weekly Underground Natural Gas Storage Report" from the week of
+      2002-03-15. Per EIA, weeks from 1994-01-07 through 2002-02-22 are estimates derived from
+      EIA monthly and American Gas Association weekly data, and the week ending 2002-03-08 is
+      linearly interpolated; those periods must be flagged as estimated when ingested.
+
+  - code: us_dry_gas_production
+    source_series_id: NG.N9070US2.M
+    name: U.S. Dry Natural Gas Production
+    category: natural_gas
+    frequency: monthly
+    period_convention: month
+    units: Million Cubic Feet
+    original_source: U.S. Energy Information Administration
+    reference_url: https://www.eia.gov/dnav/ng/hist/n9070us2m.htm
+    max_staleness_days: 100
+    notes: >-
+      Published monthly with roughly a two-month lag (the 2026-10-30 release contained data
+      through August 2026).
+
+  - code: us_lng_exports
+    source_series_id: NG.N9133US2.M
+    name: Liquefied U.S. Natural Gas Exports
+    category: natural_gas
+    frequency: monthly
+    period_convention: month
+    units: Million Cubic Feet
+    original_source: Office of Fossil Energy, U.S. Department of Energy
+    reference_url: https://www.eia.gov/dnav/ng/hist/n9133us2m.htm
+    max_staleness_days: 100
+    notes: >-
+      Per EIA, data from 1999 to current come from the Office of Fossil Energy, U.S. Department
+      of Energy, Natural Gas Imports and Exports. Published monthly with roughly a two-month lag.

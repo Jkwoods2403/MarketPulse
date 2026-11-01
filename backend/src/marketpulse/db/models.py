@@ -93,6 +93,11 @@ class Series(Base):
     period_convention: Mapped[str] = mapped_column(Text)
     units: Mapped[str] = mapped_column(Text)
     seasonal_adjustment: Mapped[str | None] = mapped_column(Text)
+    # Who produced the numbers (may differ from the provider, e.g. BLS data served by FRED).
+    original_source: Mapped[str] = mapped_column(Text)
+    release_name: Mapped[str | None] = mapped_column(Text)
+    reference_url: Mapped[str] = mapped_column(Text)  # official series page
+    notes: Mapped[str | None] = mapped_column(Text)
     license_override: Mapped[str | None] = mapped_column(Text)
     max_staleness: Mapped[timedelta] = mapped_column(Interval)
     is_active: Mapped[bool] = mapped_column(server_default=text("true"))

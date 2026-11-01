@@ -1,0 +1,173 @@
+# FRED series. Each entry was verified against its official FRED page (reference_url): title
+# (used verbatim as `name`), units, seasonal adjustment, frequency, source, and release. Each
+# series' notes were checked for third-party copyright notices (none found).
+#
+# max_staleness_days = the largest expected age of the latest period's end date just before
+# the next scheduled release, plus a buffer (checked against FRED's latest-observation and
+# last-updated dates on 2026-11-01).
+
+source: fred
+verified_on: 2026-11-01
+
+series:
+  # --- Treasury yields and policy rates ---------------------------------------------------
+  - code: ust_3m
+    source_series_id: DGS3MO
+    name: Market Yield on U.S. Treasury Securities at 3-Month Constant Maturity, Quoted on an Investment Basis
+    category: rates
+    frequency: daily
+    period_convention: business_day
+    units: Percent
+    seasonal_adjustment: not_seasonally_adjusted
+    original_source: Board of Governors of the Federal Reserve System (US)
+    release_name: H.15 Selected Interest Rates
+    reference_url: https://fred.stlouisfed.org/series/DGS3MO
+    max_staleness_days: 5
+
+  - code: ust_2y
+    source_series_id: DGS2
+    name: Market Yield on U.S. Treasury Securities at 2-Year Constant Maturity, Quoted on an Investment Basis
+    category: rates
+    frequency: daily
+    period_convention: business_day
+    units: Percent
+    seasonal_adjustment: not_seasonally_adjusted
+    original_source: Board of Governors of the Federal Reserve System (US)
+    release_name: H.15 Selected Interest Rates
+    reference_url: https://fred.stlouisfed.org/series/DGS2
+    max_staleness_days: 5
+
+  - code: ust_10y
+    source_series_id: DGS10
+    name: Market Yield on U.S. Treasury Securities at 10-Year Constant Maturity, Quoted on an Investment Basis
+    category: rates
+    frequency: daily
+    period_convention: business_day
+    units: Percent
+    seasonal_adjustment: not_seasonally_adjusted
+    original_source: Board of Governors of the Federal Reserve System (US)
+    release_name: H.15 Selected Interest Rates
+    reference_url: https://fred.stlouisfed.org/series/DGS10
+    max_staleness_days: 5
+
+  - code: ust_30y
+    source_series_id: DGS30
+    name: Market Yield on U.S. Treasury Securities at 30-Year Constant Maturity, Quoted on an Investment Basis
+    category: rates
+    frequency: daily
+    period_convention: business_day
+    units: Percent
+    seasonal_adjustment: not_seasonally_adjusted
+    original_source: Board of Governors of the Federal Reserve System (US)
+    release_name: H.15 Selected Interest Rates
+    reference_url: https://fred.stlouisfed.org/series/DGS30
+    max_staleness_days: 5
+
+  - code: ust_10y_2y_spread
+    source_series_id: T10Y2Y
+    name: 10-Year Treasury Constant Maturity Minus 2-Year Treasury Constant Maturity
+    category: rates
+    frequency: daily
+    period_convention: business_day
+    units: Percent
+    seasonal_adjustment: not_seasonally_adjusted
+    original_source: Federal Reserve Bank of St. Louis
+    release_name: Interest Rate Spreads
+    reference_url: https://fred.stlouisfed.org/series/T10Y2Y
+    max_staleness_days: 5
+    notes: Calculated by the Federal Reserve Bank of St. Louis from H.15 constant maturity yields.
+
+  - code: fed_funds_effective
+    source_series_id: DFF
+    name: Federal Funds Effective Rate
+    category: rates
+    frequency: daily
+    period_convention: calendar_day
+    units: Percent
+    seasonal_adjustment: not_seasonally_adjusted
+    original_source: Board of Governors of the Federal Reserve System (US)
+    release_name: H.15 Selected Interest Rates
+    reference_url: https://fred.stlouisfed.org/series/DFF
+    max_staleness_days: 5
+    notes: FRED lists the frequency as "Daily, 7-Day" (values for every calendar day).
+
+  # --- FX -------------------------------------------------------------------------------------
+  - code: usd_broad_index
+    source_series_id: DTWEXBGS
+    name: Nominal Broad U.S. Dollar Index
+    category: fx
+    frequency: daily
+    period_convention: business_day
+    units: Index Jan 2006=100
+    seasonal_adjustment: not_seasonally_adjusted
+    original_source: Board of Governors of the Federal Reserve System (US)
+    release_name: H.10 Foreign Exchange Rates
+    reference_url: https://fred.stlouisfed.org/series/DTWEXBGS
+    max_staleness_days: 12
+    notes: Daily values are updated weekly (e.g. data through 2026-10-23 updated 2026-10-26).
+
+  # --- Macro ----------------------------------------------------------------------------------
+  - code: cpi_all_items
+    source_series_id: CPIAUCSL
+    name: "Consumer Price Index for All Urban Consumers: All Items in U.S. City Average"
+    category: macro
+    frequency: monthly
+    period_convention: month
+    units: Index 1982-1984=100
+    seasonal_adjustment: seasonally_adjusted
+    original_source: U.S. Bureau of Labor Statistics
+    release_name: Consumer Price Index
+    reference_url: https://fred.stlouisfed.org/series/CPIAUCSL
+    max_staleness_days: 50
+
+  - code: nonfarm_payrolls
+    source_series_id: PAYEMS
+    name: All Employees, Total Nonfarm
+    category: macro
+    frequency: monthly
+    period_convention: month
+    units: Thousands of Persons
+    seasonal_adjustment: seasonally_adjusted
+    original_source: U.S. Bureau of Labor Statistics
+    release_name: Employment Situation
+    reference_url: https://fred.stlouisfed.org/series/PAYEMS
+    max_staleness_days: 45
+
+  - code: unemployment_rate
+    source_series_id: UNRATE
+    name: Unemployment Rate
+    category: macro
+    frequency: monthly
+    period_convention: month
+    units: Percent
+    seasonal_adjustment: seasonally_adjusted
+    original_source: U.S. Bureau of Labor Statistics
+    release_name: Employment Situation
+    reference_url: https://fred.stlouisfed.org/series/UNRATE
+    max_staleness_days: 45
+
+  - code: real_gdp
+    source_series_id: GDPC1
+    name: Real Gross Domestic Product
+    category: macro
+    frequency: quarterly
+    period_convention: quarter
+    units: Billions of Chained 2017 Dollars
+    seasonal_adjustment: seasonally_adjusted_annual_rate
+    original_source: U.S. Bureau of Economic Analysis
+    release_name: Gross Domestic Product
+    reference_url: https://fred.stlouisfed.org/series/GDPC1
+    max_staleness_days: 125
+
+  - code: industrial_production
+    source_series_id: INDPRO
+    name: "Industrial Production: Total Index"
+    category: macro
+    frequency: monthly
+    period_convention: month
+    units: Index 2017=100
+    seasonal_adjustment: seasonally_adjusted
+    original_source: Board of Governors of the Federal Reserve System (US)
+    release_name: G.17 Industrial Production and Capacity Utilization
+    reference_url: https://fred.stlouisfed.org/series/INDPRO
+    max_staleness_days: 50

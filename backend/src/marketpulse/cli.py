@@ -26,7 +26,71 @@ def _build_parser() -> argparse.ArgumentParser:
     downgrade.add_argument("revision", help="Target revision, e.g. -1 or base")
     db_sub.add_parser("current", help="Show the database's current revision")
 
+    catalog = sub.add_parser("catalog", help="Series catalog")
+    catalog_sub = catalog.add_subparsers(dest="catalog_command", required=True)
+    catalog_sub.add_parser("validate", help="Validate the catalog files (no database needed)")
+    sync = catalog_sub.add_parser("sync", help="Apply the catalog to ref.sources / ref.series")
+    sync.add_argument(
+        "--dry-run", action="store_true", help="Show what would change, then roll back"
+    )
+
     return parser
+
+
+def _catalog_command(command: str, *, dry_run: bool = False) -> int:
+    from marketpulse.sources.catalog import CatalogError, load_catalog
+
+    try:
+        catalog = load_catalog()
+    except CatalogError as exc:
+        print(exc)
+        return 1
+
+    if command == "validate":
+        counts = {code: len(catalog.series_for(code)) for code in catalog.sources}
+        summary = ", ".join(f"{code}: {n}" for code, n in counts.items())
+        print(
+            f"Catalog OK: {len(catalog.sources)} sources, {len(catalog.series)} series ({summary})"
+        )
+        return 0
+
+    from marketpulse.core.config import get_settings
+    from marketpulse.db.session import make_engine, make_session_factory
+    from marketpulse.ingestion.catalog_sync import CatalogSyncError, sync_catalog
+
+    engine = make_engine(get_settings())
+    try:
+        with make_session_factory(engine)() as session:
+            try:
+                report = sync_catalog(session, catalog)
+            except CatalogSyncError as exc:
+                session.rollback()
+                print(exc)
+                return 1
+            if dry_run:
+                session.rollback()
+            else:
+                session.commit()
+    finally:
+        engine.dispose()
+
+    prefix = "[dry run] would have " if dry_run else ""
+    print(
+        f"{prefix}sources: {len(report.sources_created)} created, "
+        f"{len(report.sources_updated)} updated, {len(report.sources_unchanged)} unchanged"
+    )
+    print(
+        f"{prefix}series: {len(report.series_created)} created, "
+        f"{len(report.series_updated)} updated, {len(report.series_unchanged)} unchanged, "
+        f"{len(report.series_deactivated)} deactivated"
+    )
+    for code, fields in report.series_updated.items():
+        print(f"  updated {code}: {', '.join(fields)}")
+    for code in report.series_deactivated:
+        print(f"  deactivated {code} (no longer in catalog)")
+    for code in report.sources_not_in_catalog:
+        print(f"  warning: source {code!r} is in the database but not in the catalog")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -51,6 +115,8 @@ def main(argv: list[str] | None = None) -> int:
             migrations.downgrade(revision=args.revision)
         elif args.db_command == "current":
             migrations.current()
+    elif args.command == "catalog":
+        return _catalog_command(args.catalog_command, dry_run=getattr(args, "dry_run", False))
     return 0
 
 

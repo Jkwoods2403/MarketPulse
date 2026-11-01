@@ -6,6 +6,10 @@ The Python package `marketpulse`: data ingestion, the FastAPI service, and quant
 uv sync                              # create .venv and install locked dependencies
 uv run marketpulse serve --reload    # API at http://127.0.0.1:8000  (docs at /docs)
 
+uv run marketpulse db upgrade        # apply database migrations
+uv run marketpulse catalog validate  # check the series catalog (no database needed)
+uv run marketpulse catalog sync      # apply the catalog to ref.sources / ref.series (--dry-run)
+
 uv run pytest                        # tests
 uv run ruff check . && uv run ruff format --check .   # lint + format check
 uv run mypy                          # strict type checking

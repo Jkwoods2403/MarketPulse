@@ -1,0 +1,30 @@
+# Data providers. Terms verified 2026-11-01 against the URLs below.
+#
+# license (ADR-0008): public_domain | attribution_required | personal_use_only | no_redistribution
+# A series can be more restrictive than its source via `license_override` in its series file.
+
+sources:
+  - code: eia
+    name: U.S. Energy Information Administration
+    homepage_url: https://www.eia.gov/
+    terms_url: https://www.eia.gov/about/copyrights_reuse.php
+    license: public_domain
+    attribution_text: "Source: U.S. Energy Information Administration (EIA)"
+    reference_hosts: [eia.gov]
+    notes: >-
+      EIA states that U.S. government publications are in the public domain. Items in EIA
+      products that come from third parties (for example spot prices sourced from Refinitiv)
+      may be protected; such series carry a license_override and a note.
+
+  - code: fred
+    name: FRED, Federal Reserve Bank of St. Louis
+    homepage_url: https://fred.stlouisfed.org/
+    terms_url: https://fred.stlouisfed.org/legal/
+    license: attribution_required
+    attribution_text: "Source: original data producer, retrieved from FRED, Federal Reserve Bank of St. Louis"
+    reference_hosts: [fred.stlouisfed.org]
+    notes: >-
+      FRED terms: cite the source of the data, note that it was accessed via FRED, and keep any
+      copyright notices that appear with the data. Series with a copyright notice are owned by
+      third parties and need the owner's permission for anything beyond personal use; none of
+      the series currently tracked carry such a notice (checked in each series' notes).
