@@ -43,14 +43,28 @@ def test_real_catalog_every_series_has_provenance() -> None:
         assert spec.units
 
 
-def test_third_party_spot_prices_are_flagged_for_licensing() -> None:
+REFINITIV_SPOT_SERIES = {"wti_spot", "brent_spot", "henry_hub_spot"}
+
+
+def test_third_party_spot_prices_are_personal_use_only() -> None:
+    """Refinitiv data republished by EIA: attribution alone does not grant redistribution
+    rights, so these stay personal_use_only until licensing is confirmed (ADR-0008)."""
     catalog = load_catalog()
-    for spec in catalog.series_for("eia"):
-        if spec.original_source == "Refinitiv, an LSEG business":
-            assert spec.license_override == schema.License.ATTRIBUTION_REQUIRED
-            assert spec.notes and "redistribution" in spec.notes
-    refinitiv = {s.code for s in catalog.series_for("eia") if "Refinitiv" in s.original_source}
-    assert refinitiv == {"wti_spot", "brent_spot", "henry_hub_spot"}
+    eia = {s.code: s for s in catalog.series_for("eia")}
+
+    refinitiv = {code for code, s in eia.items() if "Refinitiv" in s.original_source}
+    assert refinitiv == REFINITIV_SPOT_SERIES
+
+    for code in REFINITIV_SPOT_SERIES:
+        spec = eia[code]
+        assert spec.original_source == "Refinitiv, an LSEG business"
+        assert spec.license_override == schema.License.PERSONAL_USE_ONLY
+        assert spec.notes and "redistribution" in spec.notes
+
+
+def test_only_third_party_series_override_their_source_license() -> None:
+    overridden = {s.code for _, s in load_catalog().series if s.license_override is not None}
+    assert overridden == REFINITIV_SPOT_SERIES
 
 
 def test_catalog_vocabularies_match_database_check_constraints() -> None:

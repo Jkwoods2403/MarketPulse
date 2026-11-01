@@ -23,7 +23,7 @@ series:
     units: Dollars per Barrel
     original_source: Refinitiv, an LSEG business
     reference_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=RWTC&f=D
-    license_override: attribution_required
+    license_override: personal_use_only
     max_staleness_days: 14
     notes: >-
       Third-party data (Refinitiv, an LSEG business) republished by EIA; confirm redistribution
@@ -39,7 +39,7 @@ series:
     units: Dollars per Barrel
     original_source: Refinitiv, an LSEG business
     reference_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=RBRTE&f=D
-    license_override: attribution_required
+    license_override: personal_use_only
     max_staleness_days: 14
     notes: >-
       Third-party data (Refinitiv, an LSEG business) republished by EIA; confirm redistribution
@@ -54,7 +54,7 @@ series:
     units: Dollars per Million Btu
     original_source: Refinitiv, an LSEG business
     reference_url: https://www.eia.gov/dnav/ng/hist/rngwhhdD.htm
-    license_override: attribution_required
+    license_override: personal_use_only
     max_staleness_days: 14
     notes: >-
       Third-party data (Refinitiv, an LSEG business) republished by EIA; confirm redistribution
