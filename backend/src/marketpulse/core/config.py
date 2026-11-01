@@ -34,10 +34,17 @@ class Settings(BaseSettings):
         env_file=REPO_ROOT / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        env_ignore_empty=True,  # `KEY=` in .env means "not set", not "empty string"
     )
 
     marketpulse_env: Environment = Environment.DEVELOPMENT
     marketpulse_log_level: LogLevel = LogLevel.INFO
+
+    # Local storage for raw provider payloads (gitignored). See data/README.md.
+    marketpulse_data_dir: Path = REPO_ROOT / "data"
+
+    # Descriptive User-Agent with contact info, required by some providers (SEC EDGAR, NWS).
+    http_user_agent: str | None = None
 
     postgres_user: str = "marketpulse"
     postgres_password: SecretStr = SecretStr("")

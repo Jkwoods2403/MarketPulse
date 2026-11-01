@@ -7,8 +7,36 @@ from datetime import UTC, datetime
 from typing import Any
 
 from marketpulse.core.config import Environment, Settings
+from marketpulse.core.redaction import redact_text
 
 _STANDARD_ATTRS = frozenset(vars(logging.makeLogRecord({})).keys()) | {"message", "asctime"}
+
+# Third-party loggers that write request URLs (which may contain API keys) into log messages.
+HTTP_LIBRARY_LOGGERS = ("httpx", "httpcore")
+
+
+class RedactingFilter(logging.Filter):
+    """Rewrite each record's message with credential query parameters redacted.
+
+    Installed on HTTP library loggers and on the root handler, so a URL containing an API key
+    can never reach a log destination, even at DEBUG level.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        redacted = redact_text(message)
+        if redacted != message:
+            record.msg = redacted
+            record.args = None
+        return True
+
+
+def install_http_log_redaction() -> None:
+    """Attach a RedactingFilter to the HTTP library loggers. Idempotent."""
+    for name in HTTP_LIBRARY_LOGGERS:
+        logger = logging.getLogger(name)
+        if not any(isinstance(f, RedactingFilter) for f in logger.filters):
+            logger.addFilter(RedactingFilter())
 
 
 class JsonFormatter(logging.Formatter):
@@ -36,8 +64,14 @@ def configure_logging(settings: Settings) -> None:
         handler.setFormatter(JsonFormatter())
     else:
         handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s"))
+    handler.addFilter(RedactingFilter())
 
     root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(handler)
     root.setLevel(settings.marketpulse_log_level.value)
+
+    # httpx logs every request URL at INFO; keep it quiet and redacted regardless.
+    install_http_log_redaction()
+    for name in HTTP_LIBRARY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
