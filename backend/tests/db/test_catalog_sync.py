@@ -23,9 +23,9 @@ def without(catalog: Catalog, code: str) -> Catalog:
     )
 
 
-def changed(catalog: Catalog, code: str, **updates: object) -> Catalog:
+def changed(catalog: Catalog, series_code: str, /, **updates: object) -> Catalog:
     def apply(spec: SeriesSpec) -> SeriesSpec:
-        return spec.model_copy(update=updates) if spec.code == code else spec
+        return spec.model_copy(update=updates) if spec.code == series_code else spec
 
     return replace(catalog, series=tuple((s, apply(spec)) for s, spec in catalog.series))
 
