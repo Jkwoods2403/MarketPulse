@@ -35,6 +35,8 @@ def series(session: Session) -> Series:
         frequency="daily",
         period_convention="day",
         units="Index",
+        original_source="Synthetic test producer",
+        reference_url="https://example.invalid/series/TEST1",
         max_staleness=timedelta(days=4),
     )
     session.add(row)
@@ -148,6 +150,33 @@ def test_period_end_cannot_precede_period_start(
 
 def test_unknown_status_is_rejected(session: Session, series: Series, run: IngestionRun) -> None:
     assert_rejected(session, observation(series, run, status="interpolated"))
+
+
+@pytest.mark.parametrize("missing", ["original_source", "reference_url"])
+def test_series_without_provenance_is_rejected(session: Session, missing: str) -> None:
+    source = Source(
+        code="prov_source",
+        name="Test",
+        homepage_url="https://example.invalid",
+        license="public_domain",
+    )
+    session.add(source)
+    session.flush()
+    fields: dict[str, Any] = {
+        "source_id": source.id,
+        "source_series_id": "PROV1",
+        "code": "prov_series",
+        "name": "Synthetic",
+        "category": "test",
+        "frequency": "daily",
+        "period_convention": "business_day",
+        "units": "Index",
+        "original_source": "Synthetic test producer",
+        "reference_url": "https://example.invalid/PROV1",
+        "max_staleness": timedelta(days=4),
+    }
+    del fields[missing]
+    assert_rejected(session, Series(**fields))
 
 
 def test_unknown_license_is_rejected(session: Session) -> None:
