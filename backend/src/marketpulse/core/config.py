@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     # Descriptive User-Agent with contact info, required by some providers (SEC EDGAR, NWS).
     http_user_agent: str | None = None
 
+    # Provider credentials. SecretStr keeps them out of reprs and logs; None means not set.
+    fred_api_key: SecretStr | None = None
+
     postgres_user: str = "marketpulse"
     postgres_password: SecretStr = SecretStr("")
     postgres_db: str = "marketpulse"
