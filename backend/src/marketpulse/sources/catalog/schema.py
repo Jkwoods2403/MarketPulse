@@ -20,6 +20,8 @@ from pydantic import (
     model_validator,
 )
 
+from marketpulse.sources.fred import SERIES_ID_PATTERN as FRED_SERIES_ID_PATTERN
+
 CODE_PATTERN = r"^[a-z][a-z0-9_]{1,62}$"
 Code = Annotated[str, StringConstraints(pattern=CODE_PATTERN)]
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -146,7 +148,7 @@ class SourcesFile(_Strict):
 
 # --- provider-specific identifier rules --------------------------------------------------
 
-_FRED_ID = re.compile(r"^[A-Z0-9_]{1,30}$")
+_FRED_ID = FRED_SERIES_ID_PATTERN  # FRED's stated rule: 25 or fewer alphanumeric characters
 # EIA APIv1-style series ID: CATEGORY.SERIES.FREQUENCY (accepted by APIv2's seriesid route).
 _EIA_ID = re.compile(r"^(?P<category>[A-Z]+)\.(?P<series>[A-Z0-9_]+)\.(?P<freq>[DWMQA])$")
 _EIA_FREQ = {
@@ -160,7 +162,7 @@ _EIA_FREQ = {
 
 def _fred_id_problems(spec: SeriesSpec) -> list[str]:
     if not _FRED_ID.fullmatch(spec.source_series_id):
-        return [f"FRED series ID {spec.source_series_id!r} must be uppercase letters/digits/_"]
+        return [f"FRED series ID {spec.source_series_id!r} must be 1-25 uppercase letters/digits"]
     return []
 
 

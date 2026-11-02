@@ -1,0 +1,92 @@
+[
+  {
+    "file": "series_gdpc1.json",
+    "purpose": "Series metadata: quarterly, seasonally adjusted annual rate",
+    "request_url": "https://api.stlouisfed.org/fred/series?series_id=GDPC1&file_type=json&api_key=REDACTED",
+    "http_status": 200,
+    "retrieved_at": "2026-11-01T23:46:31.912932+00:00",
+    "sha256": "8fe9f4265d510da4cd2b8b1317db2b1b511cf39260adb4c89486b087e816f7ac",
+    "size_bytes": 930
+  },
+  {
+    "file": "series_dgs10.json",
+    "purpose": "Series metadata: daily, not seasonally adjusted",
+    "request_url": "https://api.stlouisfed.org/fred/series?series_id=DGS10&file_type=json&api_key=REDACTED",
+    "http_status": 200,
+    "retrieved_at": "2026-11-01T23:46:32.100259+00:00",
+    "sha256": "87cf3f68eaf38b10c3d187a7d9d32870af0c61c2a508f4b65d973e0ed1e68894",
+    "size_bytes": 1054
+  },
+  {
+    "file": "vintagedates_gdpc1_limit5.json",
+    "purpose": "Vintage dates first page (count exceeds returned rows)",
+    "request_url": "https://api.stlouisfed.org/fred/series/vintagedates?series_id=GDPC1&file_type=json&limit=5&api_key=REDACTED",
+    "http_status": 200,
+    "retrieved_at": "2026-11-01T23:46:32.422803+00:00",
+    "sha256": "5eafafaf1a6f769350ca0a26507d30c3bc25f6d539d059af67357312676519ca",
+    "size_bytes": 220
+  },
+  {
+    "file": "observations_gdpc1_2024q1q2_page1.json",
+    "purpose": "Quarterly revision history, page 1 of 2",
+    "request_url": "https://api.stlouisfed.org/fred/series/observations?file_type=json&output_type=1&units=lin&sort_order=asc&series_id=GDPC1&observation_start=2024-01-01&observation_end=2024-04-01&limit=6&offset=0&realtime_start=1776-07-04&realtime_end=9999-12-31&api_key=REDACTED",
+    "http_status": 200,
+    "retrieved_at": "2026-11-01T23:46:32.729961+00:00",
+    "sha256": "e9ecd168ecfd41de12194f8ebeb7a394594989ae461392acf65e4a98ae1a6f38",
+    "size_bytes": 870
+  },
+  {
+    "file": "observations_gdpc1_2024q1q2_page2.json",
+    "purpose": "Quarterly revision history, page 2 of 2",
+    "request_url": "https://api.stlouisfed.org/fred/series/observations?file_type=json&output_type=1&units=lin&sort_order=asc&series_id=GDPC1&observation_start=2024-01-01&observation_end=2024-04-01&limit=6&offset=6&realtime_start=1776-07-04&realtime_end=9999-12-31&api_key=REDACTED",
+    "http_status": 200,
+    "retrieved_at": "2026-11-01T23:46:33.343604+00:00",
+    "sha256": "bf9f6a4f2ca677887fcd39495b47f9d8bec0fd13ad4f4100d448715f665b417e",
+    "size_bytes": 770
+  },
+  {
+    "file": "observations_cpiaucsl_2026aug_sep.json",
+    "purpose": "Monthly observations (first-of-month dates); no revisions in this range",
+    "request_url": "https://api.stlouisfed.org/fred/series/observations?file_type=json&output_type=1&units=lin&sort_order=asc&series_id=CPIAUCSL&observation_start=2026-08-01&observation_end=2026-09-01&realtime_start=1776-07-04&realtime_end=9999-12-31&api_key=REDACTED",
+    "http_status": 200,
+    "retrieved_at": "2026-11-01T23:46:33.752759+00:00",
+    "sha256": "b578cb89ac87e655b7b53aaf4c1b144e35ca677f9e1a87ac51a534f0dc8fa30b",
+    "size_bytes": 470
+  },
+  {
+    "file": "observations_dgs10_holidays_window.json",
+    "purpose": "Daily observations with holiday missing values ('.'), within a real-time window",
+    "request_url": "https://api.stlouisfed.org/fred/series/observations?file_type=json&output_type=1&units=lin&sort_order=asc&series_id=DGS10&observation_start=2025-12-24&observation_end=2026-01-02&realtime_start=2026-10-01&realtime_end=9999-12-31&api_key=REDACTED",
+    "http_status": 200,
+    "retrieved_at": "2026-11-01T23:46:34.053867+00:00",
+    "sha256": "2c76d491aa7cbcf35291591f7d32e420fce213c129c2b32f480b8a7e5e5cb6e8",
+    "size_bytes": 1028
+  },
+  {
+    "file": "error_invalid_series_id.json",
+    "purpose": "HTTP 400 error body for a malformed series ID (underscores are not allowed)",
+    "request_url": "https://api.stlouisfed.org/fred/series/observations?file_type=json&output_type=1&units=lin&sort_order=asc&series_id=MARKETPULSE_NOT_A_SERIES&api_key=REDACTED",
+    "http_status": 400,
+    "retrieved_at": "2026-11-01T23:46:34.264836+00:00",
+    "sha256": "d4bdc69dd7fae58e716a9e942dcf3e6783624dfcd3191fdaf9991b90e22dd671",
+    "size_bytes": 146
+  },
+  {
+    "file": "error_nonexistent_series.json",
+    "purpose": "HTTP error body for a well-formed series ID that does not exist",
+    "request_url": "https://api.stlouisfed.org/fred/series/observations?file_type=json&output_type=1&units=lin&sort_order=asc&series_id=MARKETPULSENOSUCHSERIES&api_key=REDACTED",
+    "http_status": 400,
+    "retrieved_at": "2026-11-01T23:46:34.469241+00:00",
+    "sha256": "fd2c44985431657c67f5d743faa3e72bfc3c92e110c5927051068c2ff6f57ca5",
+    "size_bytes": 77
+  },
+  {
+    "file": "error_too_many_vintages.json",
+    "purpose": "HTTP 400 error body when a request spans more than 2,000 vintage dates",
+    "request_url": "https://api.stlouisfed.org/fred/series/observations?file_type=json&output_type=1&units=lin&sort_order=asc&series_id=DGS10&limit=1&realtime_start=1776-07-04&realtime_end=9999-12-31&api_key=REDACTED",
+    "http_status": 400,
+    "retrieved_at": "2026-11-01T23:46:34.674192+00:00",
+    "sha256": "84976a77f344346e598379a7b8fe595fc79d4e1dcbfb907aabb2ce43e18ab65f",
+    "size_bytes": 225
+  }
+]

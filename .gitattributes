@@ -19,3 +19,6 @@
 *.parquet binary
 *.gz      binary
 *.zip     binary
+
+# Recorded provider responses are verified by SHA-256: keep them byte-for-byte as recorded.
+backend/tests/fixtures/** -text

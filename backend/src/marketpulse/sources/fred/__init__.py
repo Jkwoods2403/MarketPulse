@@ -9,7 +9,12 @@ FRED API facts this package relies on (verified 2026-11-01 against the official 
   month of the quarter).
 """
 
+import re
 from datetime import date
+
+# FRED's own rule (from its HTTP 400 message): "Series IDs should be 25 or less alphanumeric
+# characters." IDs are uppercase in practice.
+SERIES_ID_PATTERN = re.compile(r"^[A-Z0-9]{1,25}$")
 
 # FRED's open-ended real-time end. Also equal to `date.max`: never add a day to it.
 REALTIME_OPEN_END = date(9999, 12, 31)

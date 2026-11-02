@@ -279,7 +279,10 @@ def test_eia_id_format(tmp_path: Path, bad_id: str) -> None:
     assert any("must look like 'PET.RWTC.D'" in p for p in problems_for(root))
 
 
-@pytest.mark.parametrize("bad_id", ["dgs10", "DGS-10", "DGS 10"])
+@pytest.mark.parametrize(
+    "bad_id",
+    ["dgs10", "DGS-10", "DGS 10", "DGS_10", "A" * 26],  # FRED: <=25 alphanumeric
+)
 def test_fred_id_format(tmp_path: Path, bad_id: str) -> None:
     root = write_catalog(
         tmp_path,
