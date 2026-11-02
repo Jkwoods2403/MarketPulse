@@ -6,6 +6,11 @@
 # its seriesid route. Seasonal adjustment is left unset because EIA does not state it on these
 # pages.
 #
+# api_route / api_description / api_units are the EIA API v2 native route and the exact
+# "series-description" and "units" strings it returns, verified live on 2026-11-01 (identical
+# on the series-ID route). Ingestion uses the native route; any difference is drift and fails
+# the series.
+#
 # max_staleness_days = the largest expected age of the latest period's end date just before
 # the next scheduled release, plus a small buffer (checked against EIA release dates).
 
@@ -21,6 +26,9 @@ series:
     frequency: daily
     period_convention: business_day
     units: Dollars per Barrel
+    api_route: petroleum/pri/spt
+    api_description: "Cushing, OK WTI Spot Price FOB (Dollars per Barrel)"
+    api_units: "$/BBL"
     original_source: Refinitiv, an LSEG business
     reference_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=RWTC&f=D
     license_override: personal_use_only
@@ -37,6 +45,9 @@ series:
     frequency: daily
     period_convention: business_day
     units: Dollars per Barrel
+    api_route: petroleum/pri/spt
+    api_description: "Europe Brent Spot Price FOB (Dollars per Barrel)"
+    api_units: "$/BBL"
     original_source: Refinitiv, an LSEG business
     reference_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=RBRTE&f=D
     license_override: personal_use_only
@@ -52,6 +63,9 @@ series:
     frequency: daily
     period_convention: business_day
     units: Dollars per Million Btu
+    api_route: natural-gas/pri/fut
+    api_description: "Henry Hub Natural Gas Spot Price (Dollars per Million Btu)"
+    api_units: "$/MMBTU"
     original_source: Refinitiv, an LSEG business
     reference_url: https://www.eia.gov/dnav/ng/hist/rngwhhdD.htm
     license_override: personal_use_only
@@ -68,6 +82,9 @@ series:
     frequency: weekly
     period_convention: week_ending_friday
     units: Thousand Barrels
+    api_route: petroleum/sum/sndw
+    api_description: "U.S. Ending Stocks excluding SPR of Crude Oil (Thousand Barrels)"
+    api_units: "MBBL"
     original_source: U.S. Energy Information Administration
     reference_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WCESTUS1&f=W
     max_staleness_days: 14
@@ -80,6 +97,9 @@ series:
     frequency: weekly
     period_convention: week_ending_friday
     units: Thousand Barrels
+    api_route: petroleum/sum/sndw
+    api_description: "U.S. Ending Stocks of Crude Oil in SPR (Thousand Barrels)"
+    api_units: "MBBL"
     original_source: U.S. Energy Information Administration
     reference_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WCSSTUS1&f=W
     max_staleness_days: 14
@@ -92,6 +112,9 @@ series:
     frequency: weekly
     period_convention: week_ending_friday
     units: Thousand Barrels per Day
+    api_route: petroleum/sum/sndw
+    api_description: "U.S. Field Production of Crude Oil (Thousand Barrels per Day)"
+    api_units: "MBBL/D"
     original_source: U.S. Energy Information Administration
     reference_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WCRFPUS2&f=W
     max_staleness_days: 14
@@ -104,6 +127,9 @@ series:
     frequency: weekly
     period_convention: week_ending_friday
     units: Percent
+    api_route: petroleum/pnp/wiup
+    api_description: "U.S. Percent Utilization of Refinery Operable Capacity"
+    api_units: "%"
     original_source: U.S. Energy Information Administration
     reference_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WPULEUS3&f=W
     max_staleness_days: 14
@@ -118,6 +144,9 @@ series:
     frequency: weekly
     period_convention: week_ending_friday
     units: Thousand Barrels
+    api_route: petroleum/sum/sndw
+    api_description: "U.S. Ending Stocks of Total Gasoline (Thousand Barrels)"
+    api_units: "MBBL"
     original_source: U.S. Energy Information Administration
     reference_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WGTSTUS1&f=W
     max_staleness_days: 14
@@ -130,6 +159,9 @@ series:
     frequency: weekly
     period_convention: week_ending_friday
     units: Thousand Barrels
+    api_route: petroleum/sum/sndw
+    api_description: "U.S. Ending Stocks of Distillate Fuel Oil (Thousand Barrels)"
+    api_units: "MBBL"
     original_source: U.S. Energy Information Administration
     reference_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WDISTUS1&f=W
     max_staleness_days: 14
@@ -143,6 +175,9 @@ series:
     frequency: weekly
     period_convention: week_ending_friday
     units: Billion Cubic Feet
+    api_route: natural-gas/stor/wkly
+    api_description: "Weekly Lower 48 States Natural Gas Working Underground Storage (Billion Cubic Feet)"
+    api_units: "BCF"
     original_source: U.S. Energy Information Administration
     reference_url: https://www.eia.gov/dnav/ng/hist/nw2_epg0_swo_r48_bcfw.htm
     max_staleness_days: 14
@@ -160,6 +195,9 @@ series:
     frequency: monthly
     period_convention: month
     units: Million Cubic Feet
+    api_route: natural-gas/sum/snd
+    api_description: "U.S. Dry Natural Gas Production (MMcf)"
+    api_units: "MMCF"
     original_source: U.S. Energy Information Administration
     reference_url: https://www.eia.gov/dnav/ng/hist/n9070us2m.htm
     max_staleness_days: 100
@@ -174,6 +212,9 @@ series:
     frequency: monthly
     period_convention: month
     units: Million Cubic Feet
+    api_route: natural-gas/move/expc
+    api_description: "Liquefied U.S. Natural Gas Exports (MMcf)"
+    api_units: "MMCF"
     original_source: Office of Fossil Energy, U.S. Department of Energy
     reference_url: https://www.eia.gov/dnav/ng/hist/n9133us2m.htm
     max_staleness_days: 100

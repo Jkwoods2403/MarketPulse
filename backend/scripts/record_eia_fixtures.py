@@ -48,7 +48,8 @@ REQUESTS: list[tuple[str, str, dict[str, str], str, bool]] = [
      "periods", False),
     ("seriesid_wcestus1_sort_asc_ignored", "seriesid/PET.WCESTUS1.W", {**ASC, "length": "3"},
      "Series-ID route: JSON-number values and total; requested ascending sort is ignored "
-     "(echo shows desc); echo reveals the native route", False),
+     "(echo shows desc); echo reveals the native route; 3 of 2,300 rows with NO warning "
+     "(the series-ID route truncates silently)", False),
     ("seriesid_wcestus1_start_end_ignored", "seriesid/PET.WCESTUS1.W",
      {"start": "2026-01-01", "end": "2026-02-28", "length": "3"},
      "Series-ID route ignores start/end (echo shows null; total is the full history)", False),
@@ -64,15 +65,17 @@ REQUESTS: list[tuple[str, str, dict[str, str], str, bool]] = [
      "Native route, monthly window: YYYY-MM periods", False),
     ("native_storage_page1", "natural-gas/stor/wkly/data",
      weekly("NW2_EPG0_SWO_R48_BCF", offset="0", length="3"),
-     "Native route paging, page 1 (offset 0, length 3); earliest observation 2010-01-01", False),
+     "Native route paging, page 1 (offset 0, length 3) with the pagination notice "
+     "'incomplete return' in top-level warnings; earliest observation 2010-01-01", False),
     ("native_storage_page2", "natural-gas/stor/wkly/data",
      weekly("NW2_EPG0_SWO_R48_BCF", offset="3", length="3"),
-     "Native route paging, page 2 (offset 3, length 3)", False),
-    ("native_overlimit_silent_truncation", "petroleum/sum/sndw/data",
+     "Native route paging, page 2 (offset 3, length 3) with the pagination notice "
+     "'incomplete return' in top-level warnings", False),
+    ("native_overlimit_length_6000", "petroleum/sum/sndw/data",
      {"frequency": "weekly", "data[0]": "value", "facets[product][0]": "EPC0", **ASC,
       "length": "6000"},
-     "Over-limit request (length=6000): HTTP 200, 5,000 rows of a larger total, and NO warning "
-     "(contrary to the documentation)", True),
+     "Over-limit request (length=6000) with 65,642 rows available: HTTP 200, 5,000 rows, and "
+     "top-level warnings 'parameter out of range: length' and 'incomplete return'", True),
     ("native_unknown_facet_empty", "petroleum/sum/sndw/data", weekly("MARKETPULSENOPE"),
      "Unknown series facet on the native route: HTTP 200, total \"0\", no rows (not an error)",
      False),

@@ -67,6 +67,18 @@ def test_only_third_party_series_override_their_source_license() -> None:
     assert overridden == REFINITIV_SPOT_SERIES
 
 
+def test_every_eia_series_has_verified_api_metadata() -> None:
+    for spec in load_catalog().series_for("eia"):
+        assert spec.api_route and not spec.api_route.startswith("/")
+        assert spec.api_description and spec.api_units
+
+
+def test_eia_api_units_are_the_raw_api_codes_not_display_units() -> None:
+    eia = {s.code: s for s in load_catalog().series_for("eia")}
+    assert (eia["wti_spot"].units, eia["wti_spot"].api_units) == ("Dollars per Barrel", "$/BBL")
+    assert eia["us_refinery_utilization"].api_units == "%"
+
+
 def test_catalog_vocabularies_match_database_check_constraints() -> None:
     assert {m.value for m in schema.License} == {m.value for m in db_enums.License}
     assert {m.value for m in schema.Frequency} == {m.value for m in db_enums.Frequency}
@@ -108,9 +120,13 @@ SERIES: dict[str, Any] = {
     "original_source": "Refinitiv, an LSEG business",
     "reference_url": "https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=RWTC&f=D",
     "max_staleness_days": 14,
+    "api_route": "petroleum/pri/spt",
+    "api_description": "Cushing, OK WTI Spot Price FOB (Dollars per Barrel)",
+    "api_units": "$/BBL",
 }
+EIA_API_FIELDS = ("api_route", "api_description", "api_units")
 FRED_SERIES: dict[str, Any] = {
-    **SERIES,
+    **{k: v for k, v in SERIES.items() if k not in EIA_API_FIELDS},
     "code": "ust_10y",
     "source_series_id": "DGS10",
     "name": "Market Yield on U.S. Treasury Securities at 10-Year Constant Maturity",
@@ -277,6 +293,33 @@ def test_eia_id_frequency_letter_must_match_frequency(tmp_path: Path) -> None:
 def test_eia_id_format(tmp_path: Path, bad_id: str) -> None:
     root = write_catalog(tmp_path, series={"eia": [with_changes(SERIES, source_series_id=bad_id)]})
     assert any("must look like 'PET.RWTC.D'" in p for p in problems_for(root))
+
+
+@pytest.mark.parametrize("field", EIA_API_FIELDS)
+def test_eia_series_requires_verified_api_metadata(tmp_path: Path, field: str) -> None:
+    root = write_catalog(tmp_path, series={"eia": [with_changes(SERIES, **{field: ...})]})
+    assert any(f"EIA series must set {field}" in p for p in problems_for(root))
+
+
+@pytest.mark.parametrize(
+    "route",
+    [
+        "/petroleum/pri/spt",
+        "petroleum/pri/spt/data",
+        "Petroleum/Pri/Spt",
+        "petroleum",
+        "petroleum//spt",
+        "petroleum/pri spt",
+    ],
+)
+def test_eia_api_route_format(tmp_path: Path, route: str) -> None:
+    root = write_catalog(tmp_path, series={"eia": [with_changes(SERIES, api_route=route)]})
+    assert any("api_route" in p for p in problems_for(root))
+
+
+def test_fred_series_do_not_need_eia_api_metadata(tmp_path: Path) -> None:
+    root = write_catalog(tmp_path, sources=[FRED_SOURCE], series={"fred": [FRED_SERIES]})
+    assert load_catalog(root).series
 
 
 @pytest.mark.parametrize(

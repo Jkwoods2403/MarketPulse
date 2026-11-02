@@ -11,7 +11,7 @@
   },
   {
     "file": "seriesid_wcestus1_sort_asc_ignored.json",
-    "purpose": "Series-ID route: JSON-number values and total; requested ascending sort is ignored (echo shows desc); echo reveals the native route",
+    "purpose": "Series-ID route: JSON-number values and total; requested ascending sort is ignored (echo shows desc); echo reveals the native route; 3 of 2,300 rows with NO warning (the series-ID route truncates silently)",
     "request_url": "https://api.eia.gov/v2/seriesid/PET.WCESTUS1.W?sort[0][column]=period&sort[0][direction]=asc&length=3&api_key=REDACTED",
     "http_status": 200,
     "retrieved_at": "2026-11-02T03:22:26.271802+00:00",
@@ -61,7 +61,7 @@
   },
   {
     "file": "native_storage_page1.json",
-    "purpose": "Native route paging, page 1 (offset 0, length 3); earliest observation 2010-01-01",
+    "purpose": "Native route paging, page 1 (offset 0, length 3) with the pagination notice 'incomplete return' in top-level warnings; earliest observation 2010-01-01",
     "request_url": "https://api.eia.gov/v2/natural-gas/stor/wkly/data?frequency=weekly&data[0]=value&facets[series][0]=NW2_EPG0_SWO_R48_BCF&sort[0][column]=period&sort[0][direction]=asc&offset=0&length=3&api_key=REDACTED",
     "http_status": 200,
     "retrieved_at": "2026-11-02T03:22:48.448053+00:00",
@@ -71,7 +71,7 @@
   },
   {
     "file": "native_storage_page2.json",
-    "purpose": "Native route paging, page 2 (offset 3, length 3)",
+    "purpose": "Native route paging, page 2 (offset 3, length 3) with the pagination notice 'incomplete return' in top-level warnings",
     "request_url": "https://api.eia.gov/v2/natural-gas/stor/wkly/data?frequency=weekly&data[0]=value&facets[series][0]=NW2_EPG0_SWO_R48_BCF&sort[0][column]=period&sort[0][direction]=asc&offset=3&length=3&api_key=REDACTED",
     "http_status": 200,
     "retrieved_at": "2026-11-02T03:22:58.424484+00:00",
@@ -80,8 +80,8 @@
     "size_bytes": 1595
   },
   {
-    "file": "native_overlimit_silent_truncation.json.gz",
-    "purpose": "Over-limit request (length=6000): HTTP 200, 5,000 rows of a larger total, and NO warning (contrary to the documentation)",
+    "file": "native_overlimit_length_6000.json.gz",
+    "purpose": "Over-limit request (length=6000) with 65,642 rows available: HTTP 200, 5,000 rows, and top-level warnings 'parameter out of range: length' and 'incomplete return' (corrected 2026-11-01: an earlier description wrongly said no warning)",
     "request_url": "https://api.eia.gov/v2/petroleum/sum/sndw/data?frequency=weekly&data[0]=value&facets[product][0]=EPC0&sort[0][column]=period&sort[0][direction]=asc&length=6000&api_key=REDACTED",
     "http_status": 200,
     "retrieved_at": "2026-11-02T03:23:09.018759+00:00",

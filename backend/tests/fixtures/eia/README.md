@@ -3,8 +3,16 @@
 **These files are real, unmodified EIA API v2 response bodies**, recorded on 2026-11-01 with
 `backend/scripts/record_eia_fixtures.py`. Requests were kept small (short date windows or a few
 rows), so no trimming was applied afterwards. The one large response
-(`native_overlimit_silent_truncation.json.gz`, 1.5 MB) is stored gzip-compressed, which is
-lossless; its SHA-256 in `manifest.json` is of the uncompressed body. A test verifies every hash.
+(`native_overlimit_length_6000.json.gz`, 1.5 MB) is stored gzip-compressed, which is lossless;
+its SHA-256 in `manifest.json` is of the uncompressed body. A test verifies every hash.
+
+> **Correction (2026-11-01, Phase B).** The Phase A report and the first version of this README
+> said the over-limit response carried no warning, and named that fixture
+> `native_overlimit_silent_truncation`. That was wrong: EIA places warnings in a **top-level
+> `warnings` list**, which the Phase A probe did not inspect. The fixture was renamed and these
+> descriptions corrected; the response bytes are unchanged. What is true: **native-route** pages
+> that do not hold all rows carry the warning `incomplete return`, and over-limit requests add
+> `parameter out of range: length`; the **series-ID route** truncates with no warning at all.
 
 **No Refinitiv-sourced data is included.** WTI, Brent, and Henry Hub spot prices are Refinitiv
 (LSEG) data republished by EIA and classified `personal_use_only`; they are never recorded here,
@@ -17,13 +25,13 @@ The invalid-key fixture was produced with a made-up key, never the real one.
 | File | What it captures |
 |---|---|
 | `metadata_petroleum_sum_sndw.json` | Route metadata: frequencies `weekly` *and* `four-week-average`, facets, data columns |
-| `seriesid_wcestus1_sort_asc_ignored.json` | Series-ID route: values and total are JSON numbers; requested ascending sort is ignored (echo shows `desc`); echo reveals the native route |
+| `seriesid_wcestus1_sort_asc_ignored.json` | Series-ID route: values and total are JSON numbers; requested ascending sort is ignored (echo shows `desc`); echo reveals the native route; 3 of 2,300 rows with **no warning** (silent truncation) |
 | `seriesid_wcestus1_start_end_ignored.json` | Series-ID route ignores `start`/`end` (echo shows `null`, total is the full history) |
 | `native_wcestus1_2026_jan_feb.json` | Native route weekly window: values and total are strings, ascending, weeks end on Friday |
 | `native_wpuleus3_2026_jan_feb.json` | Native route decimal strings (`"94.7"`) |
 | `native_n9133us2_2025.json` | Native route monthly window: `YYYY-MM` periods |
-| `native_storage_page1.json`, `native_storage_page2.json` | Native route offset paging (3 rows per page); storage history starts 2010-01-01 |
-| `native_overlimit_silent_truncation.json.gz` | `length=6000` with 65,642 rows available: HTTP 200, 5,000 rows, **no warning** (contrary to EIA's documentation) |
+| `native_storage_page1.json`, `native_storage_page2.json` | Native route offset paging (3 rows per page), each carrying the pagination notice `incomplete return` in top-level `warnings`; storage history starts 2010-01-01 |
+| `native_overlimit_length_6000.json.gz` | `length=6000` with 65,642 rows available: HTTP 200, 5,000 rows, top-level warnings `parameter out of range: length` and `incomplete return` |
 | `native_unknown_facet_empty.json` | Unknown series on the native route: HTTP 200, total `"0"`, no rows (not an error) |
 | `error_unknown_series_id.json` | HTTP 404 `{"error": ..., "code": 404}` |
 | `error_invalid_data_column.json`, `error_invalid_frequency.json` | HTTP 400 `{"error": ..., "code": 400}` |

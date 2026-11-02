@@ -120,6 +120,12 @@ class SeriesSpec(_Strict):
     license_override: License | None = None
     max_staleness_days: int = Field(ge=1, le=400)
     notes: Text | None = None
+    # Provider API metadata, verified against the live API and enforced by drift checks.
+    # Required for EIA series (see _eia_id_problems); unused by FRED, which has its own metadata
+    # endpoint. Stored in the catalog only (not in ref.series).
+    api_route: Text | None = None  # e.g. "petroleum/pri/spt" (EIA API v2 native route)
+    api_description: Text | None = None  # exact "series-description" string the API returns
+    api_units: Text | None = None  # exact "units" code the API returns, e.g. "$/BBL"
 
     _https = field_validator("reference_url")(_check_https)
 
@@ -166,17 +172,44 @@ def _fred_id_problems(spec: SeriesSpec) -> list[str]:
     return []
 
 
+_EIA_ROUTE = re.compile(r"^[a-z0-9-]+(?:/[a-z0-9-]+)+$")
+
+
+def eia_facet_series(source_series_id: str) -> str:
+    """The native-route `series` facet for an EIA ID: the middle part ('PET.RWTC.D' -> 'RWTC').
+
+    Verified for all catalogued series on 2026-11-01: the series-ID route translates each ID to
+    its native route with exactly this facet value.
+    """
+    match = _EIA_ID.fullmatch(source_series_id)
+    if not match:
+        raise ValueError(f"not an EIA series ID: {source_series_id!r}")
+    return match["series"]
+
+
 def _eia_id_problems(spec: SeriesSpec) -> list[str]:
+    problems: list[str] = []
     match = _EIA_ID.fullmatch(spec.source_series_id)
     if not match:
-        return [f"EIA series ID {spec.source_series_id!r} must look like 'PET.RWTC.D'"]
-    implied = _EIA_FREQ[match["freq"]]
-    if implied is not spec.frequency:
-        return [
-            f"EIA series ID {spec.source_series_id!r} implies {implied.value}, "
-            f"but frequency is {spec.frequency.value}"
-        ]
-    return []
+        problems.append(f"EIA series ID {spec.source_series_id!r} must look like 'PET.RWTC.D'")
+    else:
+        implied = _EIA_FREQ[match["freq"]]
+        if implied is not spec.frequency:
+            problems.append(
+                f"EIA series ID {spec.source_series_id!r} implies {implied.value}, "
+                f"but frequency is {spec.frequency.value}"
+            )
+    for field in ("api_route", "api_description", "api_units"):
+        if getattr(spec, field) is None:
+            problems.append(f"EIA series must set {field} (verified against the live API)")
+    if spec.api_route is not None and not _EIA_ROUTE.fullmatch(spec.api_route):
+        problems.append(
+            f"api_route {spec.api_route!r} must be a lowercase route like 'petroleum/pri/spt' "
+            "(no leading slash, no '/data')"
+        )
+    if spec.api_route is not None and spec.api_route.endswith("/data"):
+        problems.append("api_route must not include the trailing '/data' node")
+    return problems
 
 
 # Sources without a rule here accept any non-empty identifier.

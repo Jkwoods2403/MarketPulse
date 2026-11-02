@@ -48,6 +48,7 @@ class Settings(BaseSettings):
 
     # Provider credentials. SecretStr keeps them out of reprs and logs; None means not set.
     fred_api_key: SecretStr | None = None
+    eia_api_key: SecretStr | None = None
 
     postgres_user: str = "marketpulse"
     postgres_password: SecretStr = SecretStr("")

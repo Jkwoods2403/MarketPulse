@@ -50,6 +50,26 @@ def test_fred_api_key_unset_or_empty_is_none(
     assert Settings(_env_file=None).fred_api_key is None  # type: ignore[call-arg]
 
 
+def test_eia_api_key_is_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EIA_API_KEY", "synthetic-eia-key-0123456789")
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert settings.eia_api_key is not None
+    assert settings.eia_api_key.get_secret_value() == "synthetic-eia-key-0123456789"
+    assert "synthetic-eia-key-0123456789" not in repr(settings)
+    assert "synthetic-eia-key-0123456789" not in str(settings.model_dump())
+
+
+@pytest.mark.parametrize("value", [None, ""])
+def test_eia_api_key_unset_or_empty_is_none(
+    monkeypatch: pytest.MonkeyPatch, value: str | None
+) -> None:
+    if value is None:
+        monkeypatch.delenv("EIA_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("EIA_API_KEY", value)
+    assert Settings(_env_file=None).eia_api_key is None  # type: ignore[call-arg]
+
+
 def test_invalid_environment_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MARKETPULSE_ENV", "staging-typo")
     with pytest.raises(ValueError, match="marketpulse_env"):
