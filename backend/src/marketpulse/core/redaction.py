@@ -40,10 +40,12 @@ SENSITIVE_HEADER_NAMES: frozenset[str] = frozenset(
     }
 )
 
+# A credential parameter name followed by "=", anywhere in text (URLs, exception messages, log
+# lines), as long as the name is not the tail of a longer word ("monkey=" is not a match).
 _SECRET_PARAM_IN_TEXT = re.compile(
-    r"(?i)([?&;](?:"
+    r"(?i)((?<![A-Za-z0-9_-])(?:"
     + "|".join(re.escape(name) for name in sorted(SENSITIVE_PARAM_NAMES, key=len, reverse=True))
-    + r")=)[^&;#\s\"'<>]*"
+    + r")=)[^&;#\s\"'<>,]*"
 )
 
 # Secrets shorter than this are not substring-replaced, to avoid mangling unrelated text.

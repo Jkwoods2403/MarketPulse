@@ -60,5 +60,25 @@ def test_redact_text_removes_credential_params_in_free_text() -> None:
     assert "a=1" in redacted
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"request failed: api_key={SECRET} (timeout)",
+        f"error, token={SECRET}, retrying",
+        f"API_KEY={SECRET}",
+        f"failed (api_key={SECRET})",
+    ],
+)
+def test_redact_text_removes_credential_params_outside_urls(text: str) -> None:
+    redacted = redact_text(text)
+    assert SECRET not in redacted
+    assert REDACTED in redacted
+
+
+@pytest.mark.parametrize("text", ["monkey=banana", "turnkey=yes", "my_api_key=x"])
+def test_redact_text_does_not_match_inside_longer_words(text: str) -> None:
+    assert redact_text(text) == text
+
+
 def test_redact_text_ignores_very_short_secrets() -> None:
     assert redact_text("a b c", ["a"]) == "a b c"
