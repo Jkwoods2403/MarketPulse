@@ -5,7 +5,9 @@ and the recorded fixtures):
 - /fred/series returns metadata; /fred/series/vintagedates returns paged, sorted vintage dates;
 - /fred/series/observations returns rows by real-time period, *cut to the requested window*
   (start = max(row start, window start), end = min(row end, window end)), with offset paging;
-- a window spanning more than 2,000 vintage dates gets FRED's HTTP 400 error body;
+- a window whose *effective* vintage count exceeds 2,000 gets FRED's HTTP 400 error body, where
+  non-vintage start/end dates each count as one extra date (see effective_vintage_count: this is
+  FRED's observed behavior, which differs from its documentation);
 - unknown series get FRED's "series does not exist" HTTP 400 body.
 
 All data is synthetic and built by the test that uses it.
@@ -50,6 +52,21 @@ class SimSeries:
         current = next(r for r in self.rows if r.date == obs_date and r.realtime_end == OPEN_END)
         current.realtime_end = day_before
         self.rows.append(SimRow(obs_date, new_vintage, OPEN_END, value))
+
+
+def effective_vintage_count(vintage_dates: list[str], start: str, end: str) -> int:
+    """How many vintage dates FRED's observations endpoint counts for a real-time window.
+
+    Observed live on 2026-11-01 (DGS30), and NOT stated in FRED's documentation: the count is the
+    vintage dates listed inside [start, end], plus one if `start` is not itself a vintage date,
+    plus one if `end` is not itself a vintage date. E.g. with exactly 2,000 listed vintage dates:
+    - 2005-06-28..2014-04-18 (both vintage dates)          -> 2000, accepted;
+    - 2005-06-28..2014-04-19/20/21 (end in a weekend gap)  -> 2001, rejected;
+    - 2006-03-13 (not a vintage) .. 2014-04-22             -> 2001, rejected.
+    """
+    listed = set(vintage_dates)
+    inside = sum(start <= v <= end for v in listed)
+    return inside + (start not in listed) + (end not in listed)
 
 
 def metadata_for(spec: SeriesSpec, **overrides: object) -> dict[str, object]:
@@ -136,10 +153,10 @@ class FakeFred:
 
     def _observations(self, sim: SimSeries, params: httpx.QueryParams) -> httpx.Response:
         w_start, w_end = params["realtime_start"], params["realtime_end"]
-        in_window = [v for v in sim.vintage_dates() if w_start <= v <= w_end]
-        if len(in_window) > 2000:
+        counted = effective_vintage_count(sim.vintage_dates(), w_start, w_end)
+        if counted > 2000:
             return _fred_error(
-                f"Bad Request.  There are {len(in_window)} vintage dates in the specified "
+                f"Bad Request.  There are {counted} vintage dates in the specified "
                 f"real-time period: {w_start} to {w_end}.  This exceeds the maximum number of "
                 "vintage dates allowed for this file type (2000)."
             )
