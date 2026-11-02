@@ -7,18 +7,16 @@ truncated afterwards. Data is synthetic.
 
 import threading
 import time
-from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import Engine, select, text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 import marketpulse.ingestion.observation_writer as writer_module
 from marketpulse.core.versions import ObservationVersion
 from marketpulse.db.models import IngestionRun, Observation, Series, Source
-from marketpulse.db.session import make_session_factory
 from marketpulse.ingestion.observation_writer import write_versions
 from marketpulse.ingestion.runs import IngestionRunTracker, describe_error, record_series_versions
 from marketpulse.sources.fred.versions import vintage_instant
@@ -30,18 +28,6 @@ A, B = vintage_instant(date(2026, 10, 29)), vintage_instant(date(2026, 11, 26))
 
 def v(start: datetime, end: datetime | None, value: str) -> ObservationVersion:
     return ObservationVersion(P, date(2026, 9, 30), start, end, Decimal(value), "ok")
-
-
-@pytest.fixture
-def factory(migrated_engine: Engine) -> Iterator[sessionmaker[Session]]:
-    yield make_session_factory(migrated_engine)
-    with migrated_engine.begin() as conn:
-        conn.execute(
-            text(
-                "TRUNCATE obs.observations, ops.data_quality_issues, ops.raw_payloads, "
-                "ops.ingestion_runs, ref.series, ref.sources RESTART IDENTITY CASCADE"
-            )
-        )
 
 
 @pytest.fixture

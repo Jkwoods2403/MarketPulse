@@ -11,8 +11,8 @@ from collections.abc import Iterator
 import psycopg
 import pytest
 from psycopg import sql
-from sqlalchemy import Engine
-from sqlalchemy.orm import Session
+from sqlalchemy import Engine, text
+from sqlalchemy.orm import Session, sessionmaker
 
 from marketpulse.core.config import Settings
 from marketpulse.db import migrations
@@ -79,6 +79,23 @@ def migrated_engine(db_settings: Settings, test_db_name: str, test_db_url: str) 
     engine = make_engine(db_settings, test_db_name)
     yield engine
     engine.dispose()
+
+
+@pytest.fixture
+def factory(migrated_engine: Engine) -> Iterator[sessionmaker[Session]]:
+    """Session factory whose writes really commit (for multi-connection tests).
+
+    Every table that such tests write to is truncated afterwards, so committed data never leaks
+    into other tests.
+    """
+    yield make_session_factory(migrated_engine)
+    with migrated_engine.begin() as conn:
+        conn.execute(
+            text(
+                "TRUNCATE obs.observations, ops.data_quality_issues, ops.raw_payloads, "
+                "ops.ingestion_runs, ref.series, ref.sources RESTART IDENTITY CASCADE"
+            )
+        )
 
 
 @pytest.fixture

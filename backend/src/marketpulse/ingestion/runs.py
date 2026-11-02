@@ -146,9 +146,44 @@ class IngestionRunTracker:
                     rows_revised=self.counts.revised,
                     rows_unchanged=self.counts.unchanged,
                     error_message=describe_error(exc) if exc is not None else None,
+                    # Parameters learned during the run (e.g. windows fetched) are kept too.
+                    params=self.params,
                 )
             )
         # Returning None re-raises any exception.
+
+    def write(
+        self,
+        *,
+        series_id: int,
+        versions: Sequence[ObservationVersion],
+        retrieved_at: datetime,
+        coverage_start: datetime | None = None,
+    ) -> WriteResult:
+        """Write one series' versions in a single all-or-nothing data transaction for this run.
+
+        Updates this run's counts, and marks it partial if error-level issues were recorded.
+        """
+        if self.run_id is None:
+            raise RuntimeError("the run has not been started (use it as a context manager)")
+        with self._factory() as session, session.begin():
+            result = write_versions(
+                session,
+                series_id=series_id,
+                ingestion_run_id=self.run_id,
+                versions=versions,
+                retrieved_at=retrieved_at,
+                coverage_start=coverage_start,
+            )
+        self.counts.add(
+            fetched=result.fetched,
+            inserted=result.inserted,
+            revised=result.revised,
+            unchanged=result.unchanged,
+        )
+        if result.has_errors:
+            self.mark_partial()
+        return result
 
 
 def record_series_versions(
@@ -174,24 +209,12 @@ def record_series_versions(
         params={"series_id": series_id, **(params or {})},
     )
     with tracker as run:
-        if run.run_id is None:  # pragma: no cover  (always set by __enter__)
-            raise RuntimeError("ingestion run was not created")
-        run_id = run.run_id
-        with session_factory() as session, session.begin():
-            result = write_versions(
-                session,
-                series_id=series_id,
-                ingestion_run_id=run_id,
-                versions=versions,
-                retrieved_at=retrieved_at,
-                coverage_start=coverage_start,
-            )
-        run.counts.add(
-            fetched=result.fetched,
-            inserted=result.inserted,
-            revised=result.revised,
-            unchanged=result.unchanged,
+        result = run.write(
+            series_id=series_id,
+            versions=versions,
+            retrieved_at=retrieved_at,
+            coverage_start=coverage_start,
         )
-        if result.has_errors:
-            run.mark_partial()
-    return run_id, result
+    if tracker.run_id is None:  # pragma: no cover  (always set by __enter__)
+        raise RuntimeError("ingestion run was not created")
+    return tracker.run_id, result

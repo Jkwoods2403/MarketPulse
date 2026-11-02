@@ -34,7 +34,73 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true", help="Show what would change, then roll back"
     )
 
+    ingest = sub.add_parser("ingest", help="Ingest data from a provider")
+    ingest_sub = ingest.add_subparsers(dest="ingest_command", required=True)
+    fred = ingest_sub.add_parser(
+        "fred",
+        help="Ingest FRED series (default: all catalog series)",
+        description="Fetch FRED observations with full version history and store them. "
+        "Series with no stored data get a full backfill; others are updated incrementally. "
+        "Exit codes: 0 all succeeded, 1 any series failed, 2 some series partial.",
+    )
+    fred.add_argument(
+        "--series",
+        nargs="+",
+        metavar="CODE",
+        help="Catalog series codes to ingest (e.g. ust_10y real_gdp); default: all FRED series",
+    )
+    fred.add_argument(
+        "--full",
+        action="store_true",
+        help="Re-fetch the complete history even if data is already stored",
+    )
+
     return parser
+
+
+def _ingest_fred_command(series: list[str] | None, *, full: bool) -> int:
+    from marketpulse.core.config import get_settings
+    from marketpulse.db.session import make_engine, make_session_factory
+    from marketpulse.ingestion.fred import FredIngestionConfigError, ingest_fred
+    from marketpulse.sources.catalog import CatalogError
+
+    settings = get_settings()
+    engine = make_engine(settings)
+    try:
+        summary = ingest_fred(
+            settings=settings,
+            session_factory=make_session_factory(engine),
+            series_codes=series,
+            full=full,
+        )
+    except (FredIngestionConfigError, CatalogError) as exc:
+        print(f"error: {exc}")
+        return 1
+    finally:
+        engine.dispose()
+
+    header = (
+        f"{'series':<22} {'mode':<11} {'status':<9} {'fetched':>8} {'inserted':>8} "
+        f"{'revised':>7} {'unchanged':>9} {'issues':>6}  run"
+    )
+    print(header)
+    print("-" * len(header))
+    for o in summary.outcomes:
+        print(
+            f"{o.code:<22} {o.mode:<11} {o.status:<9} {o.fetched:>8} {o.inserted:>8} "
+            f"{o.revised:>7} {o.unchanged:>9} {o.issues:>6}  {o.run_id or '-'}"
+        )
+    for o in summary.outcomes:
+        if o.error:
+            print(f"  {o.code}: {o.error}")
+    totals = {
+        s: sum(o.status == s for o in summary.outcomes) for s in ("succeeded", "partial", "failed")
+    }
+    print(
+        f"{len(summary.outcomes)} series: {totals['succeeded']} succeeded, "
+        f"{totals['partial']} partial, {totals['failed']} failed"
+    )
+    return summary.exit_code
 
 
 def _catalog_command(command: str, *, dry_run: bool = False) -> int:
@@ -117,6 +183,8 @@ def main(argv: list[str] | None = None) -> int:
             migrations.current()
     elif args.command == "catalog":
         return _catalog_command(args.catalog_command, dry_run=getattr(args, "dry_run", False))
+    elif args.command == "ingest" and args.ingest_command == "fred":
+        return _ingest_fred_command(args.series, full=args.full)
     return 0
 
 
