@@ -1,0 +1,1 @@
+{"error":"Invalid frequency 'hourly' provided. The only valid frequencies are 'weekly', and 'four-week-average'.","code":400}

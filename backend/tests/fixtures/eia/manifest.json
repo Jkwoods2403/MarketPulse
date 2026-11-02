@@ -1,0 +1,142 @@
+[
+  {
+    "file": "metadata_petroleum_sum_sndw.json",
+    "purpose": "Route metadata: frequencies (weekly and four-week-average), facets, data columns, periods",
+    "request_url": "https://api.eia.gov/v2/petroleum/sum/sndw?api_key=REDACTED",
+    "http_status": 200,
+    "retrieved_at": "2026-11-02T03:22:26.099465+00:00",
+    "compressed": false,
+    "sha256": "3edc97c3182b8b316ebb2704ce4b36103b79afdd51a526f7a7d3941904371ba2",
+    "size_bytes": 734
+  },
+  {
+    "file": "seriesid_wcestus1_sort_asc_ignored.json",
+    "purpose": "Series-ID route: JSON-number values and total; requested ascending sort is ignored (echo shows desc); echo reveals the native route",
+    "request_url": "https://api.eia.gov/v2/seriesid/PET.WCESTUS1.W?sort[0][column]=period&sort[0][direction]=asc&length=3&api_key=REDACTED",
+    "http_status": 200,
+    "retrieved_at": "2026-11-02T03:22:26.271802+00:00",
+    "compressed": false,
+    "sha256": "94959efc46ec532df9353addcdb6a7a9dc6c142b596d9d60dd7540a12d55d365",
+    "size_bytes": 1364
+  },
+  {
+    "file": "seriesid_wcestus1_start_end_ignored.json",
+    "purpose": "Series-ID route ignores start/end (echo shows null; total is the full history)",
+    "request_url": "https://api.eia.gov/v2/seriesid/PET.WCESTUS1.W?start=2026-01-01&end=2026-02-28&length=3&api_key=REDACTED",
+    "http_status": 200,
+    "retrieved_at": "2026-11-02T03:22:35.382222+00:00",
+    "compressed": false,
+    "sha256": "94959efc46ec532df9353addcdb6a7a9dc6c142b596d9d60dd7540a12d55d365",
+    "size_bytes": 1364
+  },
+  {
+    "file": "native_wcestus1_2026_jan_feb.json",
+    "purpose": "Native route, weekly window: string values and total, ascending, weeks ending Friday",
+    "request_url": "https://api.eia.gov/v2/petroleum/sum/sndw/data?frequency=weekly&data[0]=value&facets[series][0]=WCESTUS1&sort[0][column]=period&sort[0][direction]=asc&start=2026-01-01&end=2026-02-28&api_key=REDACTED",
+    "http_status": 200,
+    "retrieved_at": "2026-11-02T03:22:35.497976+00:00",
+    "compressed": false,
+    "sha256": "083c252299cfc94d00e979ddee1f92d9dcf06df29edf9a215c567443345d506f",
+    "size_bytes": 3096
+  },
+  {
+    "file": "native_wpuleus3_2026_jan_feb.json",
+    "purpose": "Native route, decimal string values (refinery utilization percent)",
+    "request_url": "https://api.eia.gov/v2/petroleum/pnp/wiup/data?frequency=weekly&data[0]=value&facets[series][0]=WPULEUS3&sort[0][column]=period&sort[0][direction]=asc&start=2026-01-01&end=2026-02-28&api_key=REDACTED",
+    "http_status": 200,
+    "retrieved_at": "2026-11-02T03:22:41.936725+00:00",
+    "compressed": false,
+    "sha256": "0371dec5c4cecc195e9e7ca86b6dfb80c2fab3cda9baf2efe21b2716e9d74d7b",
+    "size_bytes": 3121
+  },
+  {
+    "file": "native_n9133us2_2025.json",
+    "purpose": "Native route, monthly window: YYYY-MM periods",
+    "request_url": "https://api.eia.gov/v2/natural-gas/move/expc/data?frequency=monthly&data[0]=value&facets[series][0]=N9133US2&sort[0][column]=period&sort[0][direction]=asc&start=2025-01&end=2025-12&api_key=REDACTED",
+    "http_status": 200,
+    "retrieved_at": "2026-11-02T03:22:42.073095+00:00",
+    "compressed": false,
+    "sha256": "a502ad3c349296a07824e8e0353d7feb69dfb2058b8a54d465f29cf8b6af3b50",
+    "size_bytes": 3789
+  },
+  {
+    "file": "native_storage_page1.json",
+    "purpose": "Native route paging, page 1 (offset 0, length 3); earliest observation 2010-01-01",
+    "request_url": "https://api.eia.gov/v2/natural-gas/stor/wkly/data?frequency=weekly&data[0]=value&facets[series][0]=NW2_EPG0_SWO_R48_BCF&sort[0][column]=period&sort[0][direction]=asc&offset=0&length=3&api_key=REDACTED",
+    "http_status": 200,
+    "retrieved_at": "2026-11-02T03:22:48.448053+00:00",
+    "compressed": false,
+    "sha256": "941af27cb2257c69a514cb40c9d294436ddb82024acbd8cb123024eeebec5cb0",
+    "size_bytes": 1595
+  },
+  {
+    "file": "native_storage_page2.json",
+    "purpose": "Native route paging, page 2 (offset 3, length 3)",
+    "request_url": "https://api.eia.gov/v2/natural-gas/stor/wkly/data?frequency=weekly&data[0]=value&facets[series][0]=NW2_EPG0_SWO_R48_BCF&sort[0][column]=period&sort[0][direction]=asc&offset=3&length=3&api_key=REDACTED",
+    "http_status": 200,
+    "retrieved_at": "2026-11-02T03:22:58.424484+00:00",
+    "compressed": false,
+    "sha256": "1732f8d8ba1bdf68fe9a039f2d74683299ef68c5790aa91e674db17c50f817fa",
+    "size_bytes": 1595
+  },
+  {
+    "file": "native_overlimit_silent_truncation.json.gz",
+    "purpose": "Over-limit request (length=6000): HTTP 200, 5,000 rows of a larger total, and NO warning (contrary to the documentation)",
+    "request_url": "https://api.eia.gov/v2/petroleum/sum/sndw/data?frequency=weekly&data[0]=value&facets[product][0]=EPC0&sort[0][column]=period&sort[0][direction]=asc&length=6000&api_key=REDACTED",
+    "http_status": 200,
+    "retrieved_at": "2026-11-02T03:23:09.018759+00:00",
+    "compressed": true,
+    "sha256": "e92446f5604f07ac0225c059148e768161d469fbb913a87ce32309bec7b7f945",
+    "size_bytes": 1538435
+  },
+  {
+    "file": "native_unknown_facet_empty.json",
+    "purpose": "Unknown series facet on the native route: HTTP 200, total \"0\", no rows (not an error)",
+    "request_url": "https://api.eia.gov/v2/petroleum/sum/sndw/data?frequency=weekly&data[0]=value&facets[series][0]=MARKETPULSENOPE&sort[0][column]=period&sort[0][direction]=asc&api_key=REDACTED",
+    "http_status": 200,
+    "retrieved_at": "2026-11-02T03:23:09.993480+00:00",
+    "compressed": false,
+    "sha256": "aa6672883c04f2be0820f829d73f06409b84ac511c47531dd42686984d4d2fc5",
+    "size_bytes": 328
+  },
+  {
+    "file": "error_unknown_series_id.json",
+    "purpose": "HTTP 404 body for an unknown series ID",
+    "request_url": "https://api.eia.gov/v2/seriesid/PET.MARKETPULSENOPE.W?api_key=REDACTED",
+    "http_status": 404,
+    "retrieved_at": "2026-11-02T03:23:10.929280+00:00",
+    "compressed": false,
+    "sha256": "b6622258e0c6e9c41d35006b9120a600ebf63b590cfb43c8bdc82ea4fd6b896e",
+    "size_bytes": 70
+  },
+  {
+    "file": "error_invalid_data_column.json",
+    "purpose": "HTTP 400 body for an invalid data column",
+    "request_url": "https://api.eia.gov/v2/petroleum/sum/sndw/data?frequency=weekly&data[0]=monsters&facets[series][0]=WCESTUS1&api_key=REDACTED",
+    "http_status": 400,
+    "retrieved_at": "2026-11-02T03:23:21.061583+00:00",
+    "compressed": false,
+    "sha256": "729be40454a051be11a324581493e76b68403fe50fd2d7d1f08dd133397992bc",
+    "size_bytes": 89
+  },
+  {
+    "file": "error_invalid_frequency.json",
+    "purpose": "HTTP 400 body for an invalid frequency",
+    "request_url": "https://api.eia.gov/v2/petroleum/sum/sndw/data?frequency=hourly&data[0]=value&facets[series][0]=WCESTUS1&api_key=REDACTED",
+    "http_status": 400,
+    "retrieved_at": "2026-11-02T03:23:28.527631+00:00",
+    "compressed": false,
+    "sha256": "6881880d5d73bde1397b9a25d358fddd64a14904d80252ba96769b8ac426ee5c",
+    "size_bytes": 125
+  },
+  {
+    "file": "error_invalid_api_key.json",
+    "purpose": "HTTP 403 body for an invalid API key (made-up key)",
+    "request_url": "https://api.eia.gov/v2/seriesid/PET.WCESTUS1.W?api_key=REDACTED",
+    "http_status": 403,
+    "retrieved_at": "2026-11-02T03:23:29.158183+00:00",
+    "compressed": false,
+    "sha256": "7f4320eaa82301b229c2ec6f7d3e716678d9c188db1a4e544eacfedede221959",
+    "size_bytes": 136
+  }
+]

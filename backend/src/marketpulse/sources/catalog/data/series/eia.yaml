@@ -147,10 +147,11 @@ series:
     reference_url: https://www.eia.gov/dnav/ng/hist/nw2_epg0_swo_r48_bcfw.htm
     max_staleness_days: 14
     notes: >-
-      Form EIA-912 "Weekly Underground Natural Gas Storage Report" from the week of
-      2002-03-15. Per EIA, weeks from 1994-01-07 through 2002-02-22 are estimates derived from
-      EIA monthly and American Gas Association weekly data, and the week ending 2002-03-08 is
-      linearly interpolated; those periods must be flagged as estimated when ingested.
+      Form EIA-912 "Weekly Underground Natural Gas Storage Report". Verified via EIA API v2 on
+      2026-11-01 (route natural-gas/stor/wkly, series NW2_EPG0_SWO_R48_BCF): this series begins
+      with the week ending 2010-01-01 (878 weekly observations through 2026-10-23), all from the
+      EIA-912 survey. EIA's table-level notes about estimated values for 1994-2002 apply to
+      earlier storage series, not to this one, so no periods need an "estimated" flag.
 
   - code: us_dry_gas_production
     source_series_id: NG.N9070US2.M

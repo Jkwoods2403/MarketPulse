@@ -1,0 +1,1 @@
+{"response":{"total":"0","dateFormat":"YYYY-MM-DD","frequency":"weekly","data":[]},"request":{"command":"\/v2\/petroleum\/sum\/sndw\/data\/","params":{"frequency":"weekly","data":["value"],"facets":{"series":["MARKETPULSENOPE"]},"sort":[{"column":"period","direction":"asc"}]}},"apiVersion":"2.1.14","ExcelAddInVersion":"2.1.0"}
