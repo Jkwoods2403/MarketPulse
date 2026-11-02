@@ -9,6 +9,7 @@ uv run marketpulse serve --reload    # API at http://127.0.0.1:8000  (docs at /d
 uv run marketpulse db upgrade        # apply database migrations
 uv run marketpulse catalog validate  # check the series catalog (no database needed)
 uv run marketpulse catalog sync      # apply the catalog to ref.sources / ref.series (--dry-run)
+uv run marketpulse ingest fred       # ingest FRED series (--series CODE ..., --full)
 
 uv run pytest                        # tests
 uv run ruff check . && uv run ruff format --check .   # lint + format check
@@ -16,4 +17,5 @@ uv run mypy                          # strict type checking
 uv run lint-imports                  # module boundary contracts (ADR-0002)
 ```
 
-See the [root README](../README.md) and [docs/adr](../docs/adr/) for architecture.
+See the [root README](../README.md), [docs/adr](../docs/adr/) for architecture, and
+[docs/data-sources.md](../docs/data-sources.md) for provider details.
