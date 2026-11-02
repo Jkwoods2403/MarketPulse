@@ -53,6 +53,7 @@ def ids(factory: sessionmaker[Session]) -> tuple[int, int]:
             original_source="Synthetic",
             reference_url="https://x.invalid/TEST1",
             max_staleness=timedelta(days=125),
+            vintage_basis="source_vintage",
         )
         s.add(series)
         s.flush()
@@ -274,6 +275,7 @@ def test_writers_for_different_series_do_not_block_each_other(
             original_source="Synthetic",
             reference_url="https://x.invalid/TEST2",
             max_staleness=timedelta(days=125),
+            vintage_basis="source_vintage",
         )
         run = IngestionRun(job="test.observations")
         s.add_all([other, run])

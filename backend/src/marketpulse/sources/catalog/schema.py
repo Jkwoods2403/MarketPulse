@@ -34,6 +34,13 @@ class License(StrEnum):
     NO_REDISTRIBUTION = "no_redistribution"
 
 
+class VintageBasis(StrEnum):
+    """Meaning of a source's version timestamps (mirrors db.enums.VintageBasis)."""
+
+    SOURCE_VINTAGE = "source_vintage"  # the provider publishes real-time vintages (FRED)
+    FIRST_SEEN = "first_seen"  # first retrieved by Market Pulse; not a publication time (EIA)
+
+
 class Frequency(StrEnum):
     DAILY = "daily"
     WEEKLY = "weekly"
@@ -94,6 +101,7 @@ class SourceSpec(_Strict):
     homepage_url: str
     terms_url: str
     license: License
+    vintage_basis: VintageBasis
     attribution_text: Text
     # Hosts allowed in series reference_url values for this source (official pages only).
     reference_hosts: tuple[Text, ...] = Field(min_length=1)

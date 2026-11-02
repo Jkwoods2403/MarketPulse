@@ -16,6 +16,18 @@ class License(StrEnum):
     NO_REDISTRIBUTION = "no_redistribution"
 
 
+class VintageBasis(StrEnum):
+    """What a series' version timestamps (vintage_start/vintage_end) mean.
+
+    SOURCE_VINTAGE: the provider's own real-time vintages (FRED/ALFRED realtime dates).
+    FIRST_SEEN: when Market Pulse first retrieved the value (EIA snapshots). This is not the
+    provider's publication time, and no version exists before Market Pulse first saw a value.
+    """
+
+    SOURCE_VINTAGE = "source_vintage"
+    FIRST_SEEN = "first_seen"
+
+
 class Frequency(StrEnum):
     DAILY = "daily"
     WEEKLY = "weekly"

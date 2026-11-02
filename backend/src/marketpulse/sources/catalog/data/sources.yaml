@@ -2,6 +2,11 @@
 #
 # license (ADR-0008): public_domain | attribution_required | personal_use_only | no_redistribution
 # A series can be more restrictive than its source via `license_override` in its series file.
+#
+# vintage_basis: source_vintage | first_seen
+#   source_vintage: the provider publishes real-time vintages (FRED/ALFRED).
+#   first_seen: the provider publishes no vintages; versions start when Market Pulse first
+#   retrieved a value. That time is NOT the provider's publication time. Immutable once synced.
 
 sources:
   - code: eia
@@ -9,6 +14,7 @@ sources:
     homepage_url: https://www.eia.gov/
     terms_url: https://www.eia.gov/about/copyrights_reuse.php
     license: public_domain
+    vintage_basis: first_seen
     attribution_text: "Source: U.S. Energy Information Administration (EIA)"
     reference_hosts: [eia.gov]
     notes: >-
@@ -21,6 +27,7 @@ sources:
     homepage_url: https://fred.stlouisfed.org/
     terms_url: https://fred.stlouisfed.org/legal/
     license: attribution_required
+    vintage_basis: source_vintage
     attribution_text: "Source: original data producer, retrieved from FRED, Federal Reserve Bank of St. Louis"
     reference_hosts: [fred.stlouisfed.org]
     notes: >-

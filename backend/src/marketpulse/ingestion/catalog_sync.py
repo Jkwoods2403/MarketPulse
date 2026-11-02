@@ -5,6 +5,9 @@ Rules:
 - **Identity is immutable.** A series code must always map to the same (source, source series
   ID). Changing either would silently reassign stored observations, so it is refused; retire
   the old code and add a new one instead.
+- **vintage_basis is immutable too.** Each series takes its source's vintage_basis when it is
+  created. Changing it later would change what the stored version timestamps mean (provider
+  vintages vs. first seen by Market Pulse), so it is refused.
 - **Nothing is deleted.** Series removed from the catalog are marked inactive, because stored
   observations reference them. Re-adding a series reactivates it.
 - The whole sync happens in the caller's transaction: all problems are detected before any
@@ -35,6 +38,7 @@ SERIES_FIELDS = (
     "reference_url",
     "notes",
     "license_override",
+    "vintage_basis",
     "max_staleness",
     "is_active",
 )
@@ -79,7 +83,7 @@ def _source_values(spec: SourceSpec) -> dict[str, Any]:
     }
 
 
-def _series_values(spec: SeriesSpec) -> dict[str, Any]:
+def _series_values(spec: SeriesSpec, source: SourceSpec) -> dict[str, Any]:
     return {
         "name": spec.name,
         "description": spec.description,
@@ -93,6 +97,7 @@ def _series_values(spec: SeriesSpec) -> dict[str, Any]:
         "reference_url": spec.reference_url,
         "notes": spec.notes,
         "license_override": spec.license_override.value if spec.license_override else None,
+        "vintage_basis": source.vintage_basis.value,
         "max_staleness": timedelta(days=spec.max_staleness_days),
         "is_active": True,
     }
@@ -127,6 +132,14 @@ def sync_catalog(session: Session, catalog: Catalog) -> SyncReport:
                     f"series {spec.code!r} is stored as {stored} but the catalog says {wanted}; "
                     "identity changes are not allowed (retire the code and add a new one)"
                 )
+            source_spec = catalog.sources.get(source_code)
+            wanted_basis = source_spec.vintage_basis.value if source_spec else None
+            if wanted_basis is not None and existing.vintage_basis != wanted_basis:
+                problems.append(
+                    f"series {spec.code!r} has vintage_basis {existing.vintage_basis!r} but its "
+                    f"source now says {wanted_basis!r}; vintage_basis cannot change because it "
+                    "defines what stored version timestamps mean"
+                )
         db_source = db_sources.get(source_code)
         if db_source is not None:
             other = by_identity.get((db_source.id, spec.source_series_id))
@@ -159,7 +172,7 @@ def sync_catalog(session: Session, catalog: Catalog) -> SyncReport:
     catalog_codes = set()
     for source_code, spec in catalog.series:
         catalog_codes.add(spec.code)
-        values = _series_values(spec)
+        values = _series_values(spec, catalog.sources[source_code])
         series_row = by_code.get(spec.code)
         if series_row is None:
             session.add(

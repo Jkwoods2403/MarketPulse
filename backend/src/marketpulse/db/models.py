@@ -37,6 +37,7 @@ from marketpulse.db.enums import (
     ObservationStatus,
     RunStatus,
     Severity,
+    VintageBasis,
     check_in,
 )
 
@@ -79,6 +80,7 @@ class Series(Base):
             name="license_override_valid",
         ),
         CheckConstraint("max_staleness > interval '0'", name="max_staleness_positive"),
+        CheckConstraint(check_in("vintage_basis", VintageBasis), name="vintage_basis_valid"),
         {"schema": "ref"},
     )
 
@@ -99,6 +101,10 @@ class Series(Base):
     reference_url: Mapped[str] = mapped_column(Text)  # official series page
     notes: Mapped[str | None] = mapped_column(Text)
     license_override: Mapped[str | None] = mapped_column(Text)
+    # What version timestamps mean for this series (from its source; immutable once synced):
+    # "source_vintage" (provider vintages, FRED) or "first_seen" (first retrieved by Market
+    # Pulse, EIA; not a publication time).
+    vintage_basis: Mapped[str] = mapped_column(Text)
     max_staleness: Mapped[timedelta] = mapped_column(Interval)
     is_active: Mapped[bool] = mapped_column(server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ, server_default=func.now())
@@ -156,11 +162,30 @@ class RawPayload(Base):
 
 
 class DataQualityIssue(Base):
-    """A validation finding recorded during ingestion."""
+    """A validation finding recorded during ingestion.
+
+    Most issues are one row per detection. A *tracked* issue (currently EIA "vanished_period")
+    stays one open row per series and period: repeated detections update last_detected_at,
+    last_detected_run_id, and occurrences, and the row is resolved (resolved_at,
+    resolved_by_run_id) when the period is reported again. ingestion_run_id and created_at
+    always keep the first detection.
+    """
 
     __tablename__ = "data_quality_issues"
     __table_args__ = (
         CheckConstraint(check_in("severity", Severity), name="severity_valid"),
+        CheckConstraint("occurrences >= 1", name="occurrences_positive"),
+        CheckConstraint(
+            "(resolved_at IS NULL) = (resolved_by_run_id IS NULL)", name="resolution_complete"
+        ),
+        # At most one open "vanished_period" issue per series and period.
+        Index(
+            "uq_data_quality_issues_open_vanished_period",
+            "series_id",
+            "period_start",
+            unique=True,
+            postgresql_where=text("check_name = 'vanished_period' AND resolved_at IS NULL"),
+        ),
         {"schema": "ops"},
     )
 
@@ -174,13 +199,27 @@ class DataQualityIssue(Base):
     detail: Mapped[str] = mapped_column(Text)
     severity: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ, server_default=func.now())
+    last_detected_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ, server_default=func.now())
+    last_detected_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ops.ingestion_runs.id", ondelete="CASCADE")
+    )
+    occurrences: Mapped[int] = mapped_column(Integer, server_default=text("1"))
+    resolved_at: Mapped[datetime | None] = mapped_column(TIMESTAMPTZ)
+    resolved_by_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ops.ingestion_runs.id", ondelete="CASCADE")
+    )
 
 
 # --- obs -------------------------------------------------------------------------------------
 
 
 class Observation(Base):
-    """One version (vintage) of one series value for one period. Append-only."""
+    """One version of one series value for one period. Append-only.
+
+    The meaning of [vintage_start, vintage_end) depends on the series' vintage_basis: provider
+    vintages for "source_vintage" series, first-seen-by-Market-Pulse snapshots for "first_seen"
+    series. Only vintage_end (once, when superseded) and the confirmation fields change.
+    """
 
     __tablename__ = "observations"
     __table_args__ = (
@@ -213,4 +252,12 @@ class Observation(Base):
     vintage_end: Mapped[datetime | None] = mapped_column(TIMESTAMPTZ)
     first_retrieved_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ)
     last_confirmed_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ)
+    # The run that created this version (never changes).
     ingestion_run_id: Mapped[int] = mapped_column(ForeignKey("ops.ingestion_runs.id"))
+    # Provenance recorded for first_seen (EIA) versions; NULL for FRED versions, where it was
+    # not recorded. source_period is the period exactly as the provider reported it, and
+    # raw_payload_id the raw response page where this version first appeared (never changes).
+    source_period: Mapped[str | None] = mapped_column(Text)
+    raw_payload_id: Mapped[int | None] = mapped_column(ForeignKey("ops.raw_payloads.id"))
+    # The run that last confirmed this version unchanged (first_seen writes only).
+    last_confirmed_run_id: Mapped[int | None] = mapped_column(ForeignKey("ops.ingestion_runs.id"))

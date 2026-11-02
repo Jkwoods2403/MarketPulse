@@ -46,6 +46,7 @@ def series_id(session: Session) -> int:
         original_source="U.S. Bureau of Economic Analysis",
         reference_url="https://example.invalid/GDPC1",
         max_staleness=timedelta(days=125),
+        vintage_basis="source_vintage",
     )
     session.add(series)
     session.flush()

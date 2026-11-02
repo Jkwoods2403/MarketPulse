@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from marketpulse.db.models import Series, Source
 from marketpulse.ingestion.catalog_sync import CatalogSyncError, sync_catalog
 from marketpulse.sources.catalog import Catalog, SeriesSpec, load_catalog
+from marketpulse.sources.catalog.schema import VintageBasis
 
 
 @pytest.fixture
@@ -80,6 +81,7 @@ def test_database_matches_catalog_field_by_field(session: Session, catalog: Cata
         assert row.max_staleness == timedelta(days=spec.max_staleness_days)
         assert row.notes == spec.notes
         assert row.is_active is True
+        assert row.vintage_basis == catalog.sources[source_code].vintage_basis.value
 
 
 def test_second_sync_is_idempotent(session: Session, catalog: Catalog) -> None:
@@ -163,3 +165,40 @@ def test_dry_run_rollback_leaves_database_unchanged(session: Session, catalog: C
 
     assert count(session, Source) == 0
     assert count(session, Series) == 0
+
+
+def test_series_take_their_sources_vintage_basis(session: Session, catalog: Catalog) -> None:
+    sync_catalog(session, catalog)
+    rows = session.execute(
+        select(Source.code, Series.vintage_basis).join(Source, Source.id == Series.source_id)
+    ).all()
+    assert {code: basis for code, basis in rows} == {
+        "fred": "source_vintage",
+        "eia": "first_seen",
+    }
+
+
+def test_vintage_basis_change_is_refused_and_nothing_is_written(
+    session: Session, catalog: Catalog
+) -> None:
+    sync_catalog(session, catalog)
+    flipped = replace(
+        catalog,
+        sources={
+            **catalog.sources,
+            "eia": catalog.sources["eia"].model_copy(
+                update={"vintage_basis": VintageBasis.SOURCE_VINTAGE}
+            ),
+        },
+    )
+    with pytest.raises(CatalogSyncError, match="vintage_basis cannot change"):
+        sync_catalog(session, flipped)
+    session.expire_all()
+    bases = set(
+        session.scalars(
+            select(Series.vintage_basis)
+            .join(Source, Source.id == Series.source_id)
+            .where(Source.code == "eia")
+        )
+    )
+    assert bases == {"first_seen"}

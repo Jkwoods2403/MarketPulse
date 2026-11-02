@@ -25,7 +25,10 @@ def test_every_source_column_is_synced() -> None:
 def test_value_builders_cover_their_field_lists() -> None:
     catalog = load_catalog()
     source_code, series_spec = catalog.series[0]
-    assert set(catalog_sync._series_values(series_spec)) == set(catalog_sync.SERIES_FIELDS)
+    source_spec = catalog.sources[source_code]
+    assert set(catalog_sync._series_values(series_spec, source_spec)) == set(
+        catalog_sync.SERIES_FIELDS
+    )
     assert set(catalog_sync._source_values(catalog.sources[source_code])) == set(
         catalog_sync.SOURCE_FIELDS
     )

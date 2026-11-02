@@ -82,6 +82,13 @@ def test_eia_api_units_are_the_raw_api_codes_not_display_units() -> None:
 def test_catalog_vocabularies_match_database_check_constraints() -> None:
     assert {m.value for m in schema.License} == {m.value for m in db_enums.License}
     assert {m.value for m in schema.Frequency} == {m.value for m in db_enums.Frequency}
+    assert {m.value for m in schema.VintageBasis} == {m.value for m in db_enums.VintageBasis}
+
+
+def test_vintage_basis_distinguishes_fred_vintages_from_eia_first_seen() -> None:
+    sources = load_catalog().sources
+    assert sources["fred"].vintage_basis is schema.VintageBasis.SOURCE_VINTAGE
+    assert sources["eia"].vintage_basis is schema.VintageBasis.FIRST_SEEN
 
 
 def test_cli_validate_reports_counts(capsys: pytest.CaptureFixture[str]) -> None:
@@ -97,6 +104,7 @@ SOURCE: dict[str, Any] = {
     "homepage_url": "https://www.eia.gov/",
     "terms_url": "https://www.eia.gov/about/copyrights_reuse.php",
     "license": "public_domain",
+    "vintage_basis": "first_seen",
     "attribution_text": "Source: EIA",
     "reference_hosts": ["eia.gov"],
 }
@@ -107,6 +115,7 @@ FRED_SOURCE: dict[str, Any] = {
     "homepage_url": "https://fred.stlouisfed.org/",
     "terms_url": "https://fred.stlouisfed.org/legal/",
     "license": "attribution_required",
+    "vintage_basis": "source_vintage",
     "reference_hosts": ["fred.stlouisfed.org"],
 }
 SERIES: dict[str, Any] = {

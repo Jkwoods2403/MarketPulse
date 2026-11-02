@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from marketpulse.db.models import IngestionRun, Observation, Series, Source
+from marketpulse.db.models import DataQualityIssue, IngestionRun, Observation, Series, Source
 
 T0 = datetime(2026, 1, 5, 15, 0, tzinfo=UTC)
 
@@ -38,6 +38,7 @@ def series(session: Session) -> Series:
         original_source="Synthetic test producer",
         reference_url="https://example.invalid/series/TEST1",
         max_staleness=timedelta(days=4),
+        vintage_basis="source_vintage",
     )
     session.add(row)
     session.flush()
@@ -152,7 +153,7 @@ def test_unknown_status_is_rejected(session: Session, series: Series, run: Inges
     assert_rejected(session, observation(series, run, status="interpolated"))
 
 
-@pytest.mark.parametrize("missing", ["original_source", "reference_url"])
+@pytest.mark.parametrize("missing", ["original_source", "reference_url", "vintage_basis"])
 def test_series_without_provenance_is_rejected(session: Session, missing: str) -> None:
     source = Source(
         code="prov_source",
@@ -174,6 +175,7 @@ def test_series_without_provenance_is_rejected(session: Session, missing: str) -
         "original_source": "Synthetic test producer",
         "reference_url": "https://example.invalid/PROV1",
         "max_staleness": timedelta(days=4),
+        "vintage_basis": "source_vintage",
     }
     del fields[missing]
     assert_rejected(session, Series(**fields))
@@ -188,3 +190,88 @@ def test_unknown_license_is_rejected(session: Session) -> None:
 
 def test_unknown_run_status_is_rejected(session: Session) -> None:
     assert_rejected(session, IngestionRun(job="test.job", status="done"))
+
+
+def test_unknown_vintage_basis_is_rejected(session: Session, series: Series) -> None:
+    series.vintage_basis = "official_vintage"
+    with pytest.raises(IntegrityError):
+        session.flush()
+    session.rollback()
+
+
+def test_observation_raw_payload_must_exist(
+    session: Session, series: Series, run: IngestionRun
+) -> None:
+    assert_rejected(session, observation(series, run, raw_payload_id=999_999))
+
+
+def test_observation_provenance_columns_are_optional_and_stored(
+    session: Session, series: Series, run: IngestionRun
+) -> None:
+    row = observation(series, run, source_period="2026-01-02", last_confirmed_run_id=run.id)
+    session.add(row)
+    session.flush()
+    session.refresh(row)
+    assert (row.source_period, row.raw_payload_id, row.last_confirmed_run_id) == (
+        "2026-01-02",
+        None,
+        run.id,
+    )
+
+
+def issue(series: Series, run: IngestionRun, **overrides: Any) -> DataQualityIssue:
+    fields: dict[str, Any] = {
+        "ingestion_run_id": run.id,
+        "series_id": series.id,
+        "period_start": date(2026, 1, 2),
+        "check_name": "vanished_period",
+        "detail": "synthetic",
+        "severity": "warning",
+    }
+    fields.update(overrides)
+    return DataQualityIssue(**fields)
+
+
+def test_issue_tracking_defaults(session: Session, series: Series, run: IngestionRun) -> None:
+    row = issue(series, run)
+    session.add(row)
+    session.flush()
+    session.refresh(row)
+    assert row.occurrences == 1
+    assert row.last_detected_at == row.created_at
+    assert (row.last_detected_run_id, row.resolved_at, row.resolved_by_run_id) == (None,) * 3
+
+
+def test_only_one_open_vanished_period_issue_per_series_and_period(
+    session: Session, series: Series, run: IngestionRun
+) -> None:
+    session.add(issue(series, run))
+    session.flush()
+    assert_rejected(session, issue(series, run))
+
+
+def test_resolved_or_other_issues_do_not_count_as_open_duplicates(
+    session: Session, series: Series, run: IngestionRun
+) -> None:
+    session.add_all(
+        [
+            issue(series, run, resolved_at=T0, resolved_by_run_id=run.id),
+            issue(series, run),  # the open one
+            issue(series, run, check_name="value_conflict", severity="error"),
+            issue(series, run, check_name="value_conflict", severity="error"),
+        ]
+    )
+    session.flush()
+
+
+def test_issue_resolution_needs_both_time_and_run(
+    session: Session, series: Series, run: IngestionRun
+) -> None:
+    assert_rejected(session, issue(series, run, resolved_at=T0))
+    assert_rejected(session, issue(series, run, resolved_by_run_id=run.id))
+
+
+def test_issue_occurrences_must_be_positive(
+    session: Session, series: Series, run: IngestionRun
+) -> None:
+    assert_rejected(session, issue(series, run, occurrences=0))
