@@ -13,29 +13,42 @@ Concurrency and consistency:
    change for the series (no partially written history).
 
 Database constraints remain the final guard: an unexpected conflict raises instead of being
-skipped.
+skipped. Only "source_vintage" series are accepted (label guard); first-seen (EIA) series are
+written by `snapshot_writer`. The database operations are shared with it (`version_apply`).
 """
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import cast
 
-from sqlalchemy import Table, bindparam, insert, or_, select, text, update
+from sqlalchemy import insert, or_, select
 from sqlalchemy.orm import Session
 
 from marketpulse.core.versions import ObservationVersion
+from marketpulse.db.enums import VintageBasis
 from marketpulse.db.models import DataQualityIssue, Observation, Series
+from marketpulse.ingestion.version_apply import (
+    OBSERVATION_LOCK_NAMESPACE,
+    ConcurrentModificationError,
+    VintageBasisMismatchError,
+    close_versions,
+    confirm_versions,
+    insert_rows,
+    lock_series,
+    observations_table,
+    require_vintage_basis,
+)
 from marketpulse.ingestion.versions import ERROR, PlannedIssue, StoredVersion, plan_changes
 
-# First key of the two-key advisory lock: identifies "observation writes" ("MP" in ASCII).
-OBSERVATION_LOCK_NAMESPACE = 0x4D50
-
-_INSERT_BATCH = 5_000
-
-
-class ConcurrentModificationError(RuntimeError):
-    """A row changed underneath the writer despite the lock (should never happen)."""
+__all__ = [
+    "OBSERVATION_LOCK_NAMESPACE",
+    "ConcurrentModificationError",
+    "VintageBasisMismatchError",
+    "WriteResult",
+    "load_stored_versions",
+    "lock_series",
+    "write_versions",
+]
 
 
 @dataclass
@@ -50,13 +63,6 @@ class WriteResult:
     @property
     def has_errors(self) -> bool:
         return any(issue.severity == ERROR for issue in self.issues)
-
-
-def lock_series(session: Session, series_id: int) -> None:
-    session.execute(
-        text("SELECT pg_advisory_xact_lock(:namespace, :series_id)"),
-        {"namespace": OBSERVATION_LOCK_NAMESPACE, "series_id": series_id},
-    )
 
 
 def load_stored_versions(
@@ -87,30 +93,18 @@ def write_versions(
     """
     if retrieved_at.tzinfo is None:
         raise ValueError("retrieved_at must be timezone-aware")
-    if session.get(Series, series_id) is None:
+    series = session.get(Series, series_id)
+    if series is None:
         raise ValueError(f"series id {series_id} does not exist")
+    require_vintage_basis(series, VintageBasis.SOURCE_VINTAGE)
 
     lock_series(session, series_id)
     stored = load_stored_versions(session, series_id, coverage_start)
     plan = plan_changes(stored, versions, coverage_start=coverage_start)
-    table = cast(Table, Observation.__table__)
+    table = observations_table()
 
-    for stored_id, vintage_end in plan.closes:
-        result = session.execute(
-            update(table)
-            .where(table.c.id == stored_id, table.c.vintage_end.is_(None))
-            .values(vintage_end=vintage_end, last_confirmed_at=retrieved_at)
-        )
-        if result.rowcount != 1:  # type: ignore[attr-defined]
-            raise ConcurrentModificationError(f"observation {stored_id} was not open when closing")
-
-    if plan.confirms:
-        session.execute(
-            update(table)
-            .where(table.c.id.in_(bindparam("ids", expanding=True)))
-            .values(last_confirmed_at=retrieved_at),
-            {"ids": plan.confirms},
-        )
+    close_versions(session, plan.closes, confirmed_at=retrieved_at)
+    confirm_versions(session, plan.confirms, confirmed_at=retrieved_at)
 
     rows = [
         {
@@ -127,8 +121,7 @@ def write_versions(
         }
         for v in plan.inserts
     ]
-    for start in range(0, len(rows), _INSERT_BATCH):
-        session.execute(insert(table), rows[start : start + _INSERT_BATCH])
+    insert_rows(session, insert(table), rows)
 
     if plan.issues:
         session.add_all(

@@ -32,6 +32,8 @@ from marketpulse.core.versions import ObservationVersion
 from marketpulse.db.enums import RunStatus
 from marketpulse.db.models import IngestionRun
 from marketpulse.ingestion.observation_writer import WriteResult, write_versions
+from marketpulse.ingestion.snapshot_writer import SnapshotWriteResult, write_snapshot
+from marketpulse.ingestion.snapshots import SnapshotObservation, SnapshotScope
 
 MAX_ERROR_MESSAGE_CHARS = 2_000
 
@@ -182,6 +184,44 @@ class IngestionRunTracker:
             unchanged=result.unchanged,
         )
         if result.has_errors:
+            self.mark_partial()
+        return result
+
+    def write_snapshot(
+        self,
+        *,
+        series_id: int,
+        snapshot_at: datetime,
+        scope: SnapshotScope,
+        period_format: str,
+        incoming: Sequence[SnapshotObservation],
+        incremental_window_start: str | None = None,
+    ) -> SnapshotWriteResult:
+        """Apply one first-seen snapshot in a single all-or-nothing data transaction.
+
+        A rejected snapshot commits only its issue rows (no observation changes) and marks the
+        run partial; an exception rolls the whole transaction back and fails the run.
+        """
+        if self.run_id is None:
+            raise RuntimeError("the run has not been started (use it as a context manager)")
+        with self._factory() as session, session.begin():
+            result = write_snapshot(
+                session,
+                series_id=series_id,
+                ingestion_run_id=self.run_id,
+                snapshot_at=snapshot_at,
+                scope=scope,
+                period_format=period_format,
+                incoming=incoming,
+                incremental_window_start=incremental_window_start,
+            )
+        self.counts.add(
+            fetched=result.fetched,
+            inserted=result.inserted,
+            revised=result.revised,
+            unchanged=result.confirmed,
+        )
+        if result.rejected:
             self.mark_partial()
         return result
 
