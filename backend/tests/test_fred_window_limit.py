@@ -9,6 +9,7 @@ Vintage dates here are synthetic business days arranged like DGS30's real histor
 vintage date is a Friday, followed by a weekend gap.
 """
 
+import random
 from datetime import date, timedelta
 
 import pytest
@@ -17,7 +18,10 @@ from pydantic import SecretStr
 from fred_mock import TEST_KEY, UnlimitedLimiter
 from fred_sim import FakeFred, SimRow, SimSeries, effective_vintage_count
 from marketpulse.sources.fred.client import FredAPIError, FredClient
-from marketpulse.sources.fred.windows import RealtimeWindow, plan_windows
+from marketpulse.sources.fred.windows import BOUNDARY_ALLOWANCE, RealtimeWindow, plan_windows
+from marketpulse.sources.fred.windows import (
+    effective_vintage_count as effective_vintage_count_planner,
+)
 from marketpulse.sources.http import RetryPolicy
 
 DAY = timedelta(days=1)
@@ -79,14 +83,14 @@ def test_non_vintage_start_date_also_counts() -> None:
 
 
 class _VintageOnlySim(FakeFred):
-    """Serve a vintage-date list directly, independent of observation rows."""
+    """A daily-series-like history: each vintage date publishes one new observation that stays
+    current, so long-lived values span window boundaries (and must be rejoined)."""
 
     def __init__(self, vintages: list[date]) -> None:
         super().__init__()
         self.series["DGS30"] = SimSeries(
             {"id": "DGS30"},
-            [SimRow("1977-02-15", v.isoformat(), v.isoformat(), "7.75") for v in vintages[:-1]]
-            + [SimRow("1977-02-15", vintages[-1].isoformat(), "9999-12-31", "7.75")],
+            [SimRow(v.isoformat(), v.isoformat(), "9999-12-31", "7.75") for v in vintages],
         )
 
 
@@ -110,16 +114,64 @@ def test_simulator_rejects_window_ending_in_a_gap_with_freds_message() -> None:
     )
 
 
-# --- the incident, reproduced with the planner as it was on 2026-11-01 ------------------------
+# --- the incident, reproduced with the planning used on 2026-11-01 ----------------------------
 
 
-def test_planner_at_time_of_incident_produced_a_rejected_window() -> None:
-    """Commit 42af1a4's planning: up to 2,000 *listed* vintage dates per window, ending the day
-    before the next window. With a weekend after the 2,000th vintage, FRED counts 2,001."""
-    windows = plan_windows(VINTAGES, max_vintages=2000)
-    first = windows[0]
-    assert first.end == VINTAGES[2000] - DAY  # Monday, not a vintage date
+def old_planning(vintages: list[date]) -> list[RealtimeWindow]:
+    """The planning in commit 42af1a4: up to 2,000 *listed* vintage dates per window, each ending
+    the day before the next. Equivalent to today's planner with no boundary allowance
+    (limit 2,000 + 2), kept here only to reproduce the incident."""
+    return plan_windows(vintages, limit=2000 + BOUNDARY_ALLOWANCE)
+
+
+def test_old_planning_reproduces_the_live_failure() -> None:
+    first = old_planning(VINTAGES)[0]
+    assert first.end == VINTAGES[2000] - DAY  # the Monday holiday, not a vintage date
     assert sum(first.start <= v <= first.end for v in VINTAGES) == 2000  # looks fine...
     assert effective_vintage_count(ISO, first.start.isoformat(), first.end.isoformat()) == 2001
     with pytest.raises(FredAPIError, match="There are 2001 vintage dates"):
-        fetch(first)  # ...but FRED rejects it
+        fetch(first)  # ...but FRED rejects it, exactly as in the live run
+
+
+# --- the fix -----------------------------------------------------------------------------------
+
+
+def test_new_planner_windows_are_all_accepted() -> None:
+    windows = plan_windows(VINTAGES)
+    assert len(windows) == 2
+    for window in windows:
+        assert (
+            effective_vintage_count(ISO, window.start.isoformat(), window.end.isoformat()) <= 2000
+        )
+        fetch(window)  # accepted by the simulator applying FRED's observed rule
+
+
+def test_fetch_history_over_incident_history_returns_every_value_exactly_once() -> None:
+    with client_for(_VintageOnlySim(VINTAGES)) as client:
+        windows, rows = client.fetch_history("DGS30")
+    assert windows[0].start == VINTAGES[0] and windows[-1].end == date(9999, 12, 31)
+    assert len(rows) == len(VINTAGES)  # window splits rejoined: no duplicates, nothing lost
+    assert [(r.observation_date, r.realtime_start) for r in rows] == [(v, v) for v in VINTAGES]
+    assert all(r.is_current for r in rows)
+
+
+@pytest.mark.parametrize("gap_start", [False, True])
+def test_new_planner_handles_incremental_start_in_a_gap(gap_start: bool) -> None:
+    start = VINTAGES[2000] - DAY if gap_start else VINTAGES[1]
+    windows = plan_windows(VINTAGES, start=start)
+    for window in windows:
+        fetch(window)
+
+
+def test_planner_rule_matches_the_simulated_fred_rule() -> None:
+    rng = random.Random(7)
+    for _ in range(300):
+        a = rng.randrange(len(VINTAGES) - 1)
+        b = rng.randrange(a, len(VINTAGES))
+        window = RealtimeWindow(
+            VINTAGES[a] - timedelta(days=rng.choice([0, 0, 1, 2])),
+            VINTAGES[b] + timedelta(days=rng.choice([0, 0, 1, 2])),
+        )
+        assert effective_vintage_count_planner(window, VINTAGES) == effective_vintage_count(
+            ISO, window.start.isoformat(), window.end.isoformat()
+        )

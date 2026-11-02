@@ -45,9 +45,7 @@ def test_real_revision_history_split_at_a_window_boundary_is_restored() -> None:
 
 
 def test_unchanged_value_split_across_many_windows_becomes_one_period() -> None:
-    windows = plan_windows(
-        [D(2005, 6, 28), D(2010, 1, 1), D(2015, 1, 1), D(2020, 1, 1)], max_vintages=1
-    )
+    windows = plan_windows([D(2005, 6, 28), D(2010, 1, 1), D(2015, 1, 1), D(2020, 1, 1)], limit=3)
     pieces = [obs(D(1962, 1, 2), w.start, w.end, "4.06") for w in windows]
     assert merge_window_splits(pieces) == [
         obs(D(1962, 1, 2), D(2005, 6, 28), REALTIME_OPEN_END, "4.06")

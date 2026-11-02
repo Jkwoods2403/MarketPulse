@@ -179,7 +179,7 @@ def test_fetch_history_uses_windows_and_rejoins_splits() -> None:
         )
 
     h = FredHarness(handler)
-    windows, rows = h.client.fetch_history("DGS10", max_vintages=2)
+    windows, rows = h.client.fetch_history("DGS10", limit=4)  # 2 listed per window
 
     assert [(w.start.isoformat(), w.end.isoformat()) for w in windows] == [
         ("2020-01-01", "2021-12-31"),

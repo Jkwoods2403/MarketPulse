@@ -229,15 +229,16 @@ class FredClient:
         series_id: str,
         *,
         start: date | None = None,
-        max_vintages: int = MAX_VINTAGES_PER_REQUEST,
+        limit: int = MAX_VINTAGES_PER_REQUEST,
         page_size: int = MAX_ROWS_PER_REQUEST,
     ) -> tuple[list[RealtimeWindow], list[FredObservation]]:
         """Fetch every real-time period from `start` (default: first vintage) to today.
 
+        `limit` is FRED's effective vintage-dates-per-request limit (see windows.py).
         Returns the windows used and the observations with window-edge splits rejoined.
         """
         vintages = self.vintage_dates(series_id)
-        windows = plan_windows(vintages, start=start, max_vintages=max_vintages)
+        windows = plan_windows(vintages, start=start, limit=limit)
         rows: list[FredObservation] = []
         for window in windows:
             rows.extend(self.observations(series_id, window, page_size=page_size))

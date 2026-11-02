@@ -60,6 +60,7 @@ select = [
 "tests/**" = [
     "S101",  # assert is expected in tests
     "S105",  # synthetic fake secrets are used to prove redaction works
+    "S311",  # seeded pseudo-random test data (reproducible, not security-relevant)
 ]
 
 # --- mypy -------------------------------------------------------------------------
