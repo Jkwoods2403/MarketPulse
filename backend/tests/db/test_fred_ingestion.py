@@ -39,6 +39,7 @@ from marketpulse.ingestion.fred import (
     ingest_fred,
 )
 from marketpulse.ingestion.raw_store import RawPayloadStore, StoredPayload
+from marketpulse.ingestion.runs import IngestionRunTracker
 from marketpulse.sources.catalog import load_catalog
 from marketpulse.sources.fred.client import FredClient, ResponseHook
 from marketpulse.sources.fred.parse import parse_observations
@@ -382,6 +383,99 @@ def test_run_finalization_failure_is_never_reported_as_success(
     by_id = {r.id: r for r in env.runs()}
     assert by_id[unrecorded.run_id or 0].status == "running"
     assert ok.status == "succeeded" and by_id[ok.run_id or 0].status == "succeeded"
+
+
+# --- per-series isolation of database errors (D5.1) ----------------------------------------------
+
+
+def break_latest_vintage_read(env: Env, monkeypatch: pytest.MonkeyPatch, *codes: str) -> None:
+    """Make the stored-data read that chooses the mode fail for `codes` (connection reset)."""
+    broken = {env.series_id(code) for code in codes}
+    original = fred_job._latest_vintage_date
+
+    def flaky(factory: sessionmaker[Session], series_id: int) -> date | None:
+        if series_id in broken:
+            raise OperationalError("SELECT max(vintage_start)", {}, Exception("connection reset"))
+        return original(factory, series_id)
+
+    monkeypatch.setattr(fred_job, "_latest_vintage_date", flaky)
+
+
+def test_database_error_choosing_one_mode_does_not_stop_the_other_series(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    break_latest_vintage_read(env, monkeypatch, "ust_10y")
+    summary = env.run("ust_10y", "real_gdp")
+
+    failed, ok = summary.outcomes
+    assert (failed.code, failed.status, failed.mode) == ("ust_10y", "failed", "unknown")
+    assert failed.error and failed.error.startswith("OperationalError")
+    assert (ok.code, ok.status, ok.mode, ok.inserted) == ("real_gdp", "succeeded", "full", 11)
+    assert summary.exit_code == 1
+
+    by_id = {r.id: r for r in env.runs()}
+    run = by_id[failed.run_id or 0]  # the failure is recorded on the series' own run
+    assert run.status == "failed" and run.finished_at is not None
+    assert run.error_message and run.error_message.startswith("OperationalError")
+    assert run.params["series_code"] == "ust_10y" and "mode" not in run.params
+    assert env.raw_payloads(run.id) == [] and env.issues(run.id) == []
+    assert env.fake.requests_for("DGS10", "") == []  # nothing was requested for it
+    assert env.observations("ust_10y") == []
+
+    ok_run = by_id[ok.run_id or 0]  # the next series' run records its mode as before
+    assert (ok_run.params["mode"], ok_run.params["realtime_start"]) == ("full", None)
+    assert len(env.observations("real_gdp")) == 11
+
+
+def test_series_after_a_failed_mode_read_still_runs_incrementally(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env.run("ust_10y", "real_gdp")  # both stored
+    latest = max(o.vintage_start for o in env.observations("real_gdp"))
+    break_latest_vintage_read(env, monkeypatch, "ust_10y")
+    failed, ok = env.run("ust_10y", "real_gdp").outcomes
+    assert (failed.status, failed.mode) == ("failed", "unknown")
+    assert (ok.status, ok.mode, ok.inserted) == ("succeeded", "incremental", 0)
+    ok_run = next(r for r in env.runs() if r.id == ok.run_id)
+    assert (
+        ok_run.params["realtime_start"]
+        == latest.astimezone(fred_job.FRED_TIMEZONE).date().isoformat()
+    )
+
+    monkeypatch.undo()  # a retry is an ordinary new run
+    (retry,) = env.run("ust_10y").outcomes
+    assert (retry.status, retry.mode, retry.inserted) == ("succeeded", "incremental", 0)
+
+
+def test_full_mode_does_not_read_stored_data(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """--full never needed the stored-data read, and still does not (behavior preserved)."""
+    break_latest_vintage_read(env, monkeypatch, "ust_10y", "real_gdp")
+    summary = env.run("ust_10y", "real_gdp", full=True)
+    assert [(o.status, o.mode) for o in summary.outcomes] == [
+        ("succeeded", "full"),
+        ("succeeded", "full"),
+    ]
+
+
+def test_run_creation_failure_for_one_series_does_not_stop_the_other(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original_enter = IngestionRunTracker.__enter__
+
+    def enter(self: IngestionRunTracker) -> IngestionRunTracker:
+        if self.params.get("series_code") == "ust_10y":
+            raise OperationalError("INSERT INTO ops.ingestion_runs", {}, Exception("db down"))
+        return original_enter(self)
+
+    monkeypatch.setattr(IngestionRunTracker, "__enter__", enter)
+    summary = env.run("ust_10y", "real_gdp")
+    failed, ok = summary.outcomes
+    assert (failed.status, failed.run_id, failed.mode) == ("failed", None, "unknown")
+    assert failed.error and "db down" in failed.error
+    assert ok.status == "succeeded" and len(env.observations("real_gdp")) == 11
+    assert [r.params["series_code"] for r in env.runs()] == ["real_gdp"]
+    assert env.fake.requests_for("DGS10", "") == []
+    assert summary.exit_code == 1
 
 
 # --- configuration errors stop before any request ----------------------------------------------

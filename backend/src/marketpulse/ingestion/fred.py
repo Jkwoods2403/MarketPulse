@@ -3,11 +3,12 @@
 Per series, inside one tracked ingestion run (`ops.ingestion_runs`, job "fred.observations"):
 
 1. Resolve the series in the version-controlled catalog and in ref.series (identity must match).
-2. Fetch FRED series metadata and run the catalog drift check. Error-level drift stops the
+2. Open the run, then choose the mode: a full backfill if nothing is stored yet (or --full),
+   otherwise an incremental fetch starting at the newest stored vintage date (one-day overlap,
+   harmless because writes are idempotent). The stored-data read happens inside the run, so a
+   database error there fails only this series and is recorded on its run.
+3. Fetch FRED series metadata and run the catalog drift check. Error-level drift stops the
    series before any observations are requested (recorded as data-quality issues + failed run).
-3. Choose the mode: a full backfill if nothing is stored yet (or --full), otherwise an
-   incremental fetch starting at the newest stored vintage date (one-day overlap, harmless
-   because writes are idempotent).
 4. Fetch all real-time windows and pages (<= 2,000 vintage dates per window). Every successful
    response is saved to data/raw and recorded in ops.raw_payloads *before* it is parsed, in its
    own committed transaction, so the record of what FRED returned survives any later failure.
@@ -42,6 +43,7 @@ logger = logging.getLogger(__name__)
 
 JOB_NAME = "fred.observations"
 SOURCE_CODE = "fred"
+MODE_UNKNOWN = "unknown"  # the mode is chosen inside the run; a run that fails first has none
 
 ClientFactory = Callable[[ResponseHook], FredClient]
 
@@ -254,8 +256,6 @@ def _ingest_series(
     full: bool,
 ) -> SeriesOutcome:
     fred_id = spec.source_series_id
-    latest = None if full else _latest_vintage_date(session_factory, series_id)
-    mode = "incremental" if latest is not None else "full"
     tracker = IngestionRunTracker(
         session_factory,
         job=JOB_NAME,
@@ -264,12 +264,10 @@ def _ingest_series(
             "series_id": series_id,
             "series_code": spec.code,
             "fred_series_id": fred_id,
-            "mode": mode,
-            "realtime_start": latest.isoformat() if latest else None,
         },
     )
     outcome = SeriesOutcome(
-        code=spec.code, fred_series_id=fred_id, status="", run_id=None, mode=mode
+        code=spec.code, fred_series_id=fred_id, status="", run_id=None, mode=MODE_UNKNOWN
     )
     try:
         with tracker as run:
@@ -278,6 +276,14 @@ def _ingest_series(
                 raise RuntimeError("ingestion run was not created")
             outcome.run_id = run_id
             recorder.start_run(run_id)
+
+            # Inside the run: a database error here fails this series only, on its own run.
+            latest = None if full else _latest_vintage_date(session_factory, series_id)
+            outcome.mode = "incremental" if latest is not None else "full"
+            run.params.update(
+                mode=outcome.mode,
+                realtime_start=latest.isoformat() if latest else None,
+            )
 
             metadata = client.series_metadata(fred_id)
             run.params["source_last_updated"] = metadata.last_updated.isoformat()
@@ -328,7 +334,7 @@ def _ingest_series(
     logger.info(
         "FRED %s (%s): %s, %d fetched, %d inserted, %d revised, %d unchanged",
         spec.code,
-        mode,
+        outcome.mode,
         outcome.status,
         counts.fetched,
         counts.inserted,
