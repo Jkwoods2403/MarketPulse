@@ -16,9 +16,11 @@ import httpx
 import pytest
 from pydantic import SecretStr
 from sqlalchemy import select, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 import marketpulse.ingestion.fred as fred_job
+import marketpulse.ingestion.runs as runs_module
 from fred_mock import TEST_KEY, UnlimitedLimiter, fixture
 from fred_sim import FakeFred, SimRow, SimSeries, metadata_for
 from marketpulse.cli import main
@@ -352,6 +354,34 @@ def test_existing_history_survives_a_later_failed_run(env: Env) -> None:
     env.fake.failures["GDPC1"] = lambda r: httpx.Response(503)
     assert env.run("real_gdp").outcomes[0].status == "failed"
     assert [(o.id, o.value, o.vintage_end) for o in env.observations("real_gdp")] == before
+
+
+def test_run_finalization_failure_is_never_reported_as_success(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Shared tracker change (D4 review): the FRED job keeps its statuses and exit codes, but a
+    run whose outcome could not be recorded is no longer reported as succeeded."""
+    original = runs_module.update
+    calls = {"n": 0}
+
+    def update_failing_once(*args: object, **kwargs: object) -> object:
+        calls["n"] += 1
+        if calls["n"] == 1:  # the first series' final run update
+            raise OperationalError("UPDATE ops.ingestion_runs", {}, Exception("connection lost"))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(runs_module, "update", update_failing_once)
+    summary = env.run("ust_10y", "real_gdp")
+
+    unrecorded, ok = summary.outcomes
+    assert summary.exit_code == 1
+    assert unrecorded.status == "failed"
+    assert unrecorded.error and "RunFinalizationError" in unrecorded.error
+    assert "already committed" in unrecorded.error  # never presented as rolled back
+    assert len(env.observations("ust_10y")) == 3  # the data transaction had committed
+    by_id = {r.id: r for r in env.runs()}
+    assert by_id[unrecorded.run_id or 0].status == "running"
+    assert ok.status == "succeeded" and by_id[ok.run_id or 0].status == "succeeded"
 
 
 # --- configuration errors stop before any request ----------------------------------------------

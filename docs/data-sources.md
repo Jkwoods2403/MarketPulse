@@ -11,7 +11,7 @@ The authoritative list of tracked series is the version-controlled catalog in
 | Source | Status | License (catalog) |
 |---|---|---|
 | [FRED](#fred-federal-reserve-bank-of-st-louis) | **Ingested** (12 series, full version history) | `attribution_required` |
-| [EIA](#eia-us-energy-information-administration) | Catalogued (12 series), connector pending (Milestone 1.5) | `public_domain`; 3 series `personal_use_only` |
+| [EIA](#eia-us-energy-information-administration) | Connector built (12 series, first-seen snapshots); not yet run against the live API | `public_domain`; 3 series `personal_use_only` |
 
 ---
 
@@ -147,14 +147,113 @@ Verification after the backfill (2026-11-01):
 
 ## EIA (U.S. Energy Information Administration)
 
-*Catalog verified 2026-11-01; the connector is Milestone 1.5.*
+*Catalog and API behavior verified 2026-11-01 against the live API (recorded fixtures in
+`backend/tests/fixtures/eia/`). The connector (Milestone 1.5) is built and tested against a
+simulator of that behavior; **no EIA data has been ingested from the live API yet.***
+
+### Terms and licensing
 
 - **Terms:** <https://www.eia.gov/about/copyrights_reuse.php>. U.S. government publications are
   in the public domain; third-party items in EIA products may be protected.
-- **Catalog license:** `public_domain`, except WTI, Brent, and Henry Hub spot prices, which are
-  Refinitiv (LSEG) data republished by EIA and are classified `personal_use_only` until
-  redistribution rights are confirmed.
-- **Series IDs:** EIA API v1-style IDs (e.g. `PET.RWTC.D`), which EIA API v2 accepts through its
-  series-ID route.
-- API limits, error formats, and ingestion details will be documented here when the connector is
-  built.
+- **Catalog license:** `public_domain`, except **WTI, Brent, and Henry Hub spot prices**
+  (`wti_spot`, `brent_spot`, `henry_hub_spot`), which are Refinitiv (LSEG) data republished by
+  EIA. They are classified **`personal_use_only`**: they are ingested by default for personal use,
+  but Market Pulse does not assume any right to redistribute or publicly display them. That
+  classification stays until redistribution rights are confirmed.
+- **Attribution:** "Source: U.S. Energy Information Administration (EIA)".
+
+### API usage
+
+- **Series IDs:** EIA API v1-style IDs (e.g. `PET.RWTC.D`). Ingestion uses the **native route**
+  of each series (`<route>/data`, filtered by the `series` facet), which honors ascending sort and
+  returns values as exact decimal strings. The series-ID route is used only to resolve and verify
+  routes when the catalog is built: it ignores sort and `start`/`end`, returns JSON numbers, and
+  truncates without any warning. It is not called on every ingestion run.
+- **Limits:** EIA publishes no numeric rate limit; Market Pulse uses 1 request/second with bursts
+  of 5, retries 429/5xx/transport errors, and never logs or stores the API key (URLs are
+  redacted). Pages hold at most 5,000 rows.
+- **Completeness:** every page is requested at offset = rows received so far; the client stops
+  at EIA's reported total and then re-checks requested and echoed offsets, stable totals,
+  duplicate periods, ascending order, received == total, and metadata (frequency, date format,
+  series, description, units) against the catalog. EIA's "incomplete return" notice is expected
+  on every page that does not hold all remaining rows; any other warning fails the request. An
+  unknown series answers HTTP 200 with total 0, which fails as an empty response.
+- **Periods:** daily and weekly periods are `YYYY-MM-DD` (weekly = the week's last day, a Friday
+  for every tracked weekly series); monthly periods are `YYYY-MM`. Other frequencies are refused.
+
+### How Market Pulse versions EIA data (first-seen snapshots)
+
+EIA publishes **no vintages**, so Market Pulse records what it saw and when
+([ADR-0011](adr/0011-first-seen-snapshot-versioning.md)); `ref.series.vintage_basis` is
+`first_seen` for every EIA series.
+
+- Each complete, validated response for one series is a **snapshot** at one instant,
+  `snapshot_at`, taken only after every page was retrieved, validated, and mapped to its raw
+  payload. New periods start a version at `snapshot_at`; unchanged values (exact decimal
+  equality) are confirmed; changed values close the old version and start a new one.
+- **Version times are when Market Pulse first retrieved a value, not EIA's publication time.**
+  No earlier vintages are invented.
+- **Provenance:** every stored EIA version records the period exactly as EIA reported it and the
+  raw response **page** that contained it (`raw_payload_id`, with the page's SHA-256 and retrieval
+  time in `ops.raw_payloads`). Each series is ingested in its own run, and each page's URL must
+  be exactly the request made for that series: EIA host, path `/v2/<route>/data`, series facet,
+  frequency, sort, page length, offset, and window `start` (incremental runs only), with no other
+  parameters (several series share `petroleum/sum/sndw`).
+- **Disappearing periods:** a stored period missing from a snapshot is kept unchanged and tracked
+  as an open `vanished_period` warning. If **more than 5 periods, or more than 1% of the stored
+  periods in scope**, vanish at once, the whole snapshot is rejected and nothing changes (no
+  minimum scope size). Stale, replayed, or out-of-order snapshots are rejected the same way.
+- **Modes:** the first run for a series (or `--full`) takes a full-history snapshot. Later runs
+  are incremental from W = the latest stored period minus **90 days** (daily), **26 weeks**
+  (weekly), or **26 months** (monthly); the request starts one period before W and rows before W
+  are dropped, so correctness does not depend on whether EIA's `start` is inclusive. In a small
+  incremental window the 1% rule means a single vanished period rejects the snapshot.
+- **Outcomes:** `succeeded` (applied), `partial` (snapshot rejected; no observation changed),
+  `failed` (fetch, validation, provenance, or write error; no observation changed), and
+  `UNFINALIZED` (the run's outcome could not be recorded, so its run row still says `running`;
+  the CLI states whether the snapshot's observations had already been committed, and committed
+  changes are kept, never reported as rolled back). Exit codes: 0 all succeeded, 1 any failed or
+  unfinalized, 2 otherwise if any partial. The vanished count is reported for rejected snapshots
+  too; `-` means it was not determined. Successful raw responses and the run record are always
+  kept (HTTP error responses are not stored). A retry is a new run. Each series is independent:
+  a database error for one series (even while choosing its window) fails only that series.
+- **Diagnostics:** failures that describe what EIA returned also record error-level
+  data-quality issues: `eia_empty_response`, `eia_incomplete`, `eia_warning`, `eia_metadata`,
+  `eia_data_error` (other validation failures), `eia_malformed_response`, `eia_invalid_row`, and
+  `eia_request_rejected` (HTTP 400/404; the cause is not assumed). Authentication failures (403),
+  rate limits (429), server and transport failures, and internal provenance or database errors
+  are operational: recorded only in the run's error message.
+- **API key:** a missing, empty, or whitespace-only `EIA_API_KEY` stops the job with a
+  configuration error before any request or run is made.
+- **Point-in-time queries** (`marketpulse.analytics.point_in_time`): the version active at an
+  instant, `vintage_start <= as_of < vintage_end` (or no end), returned with the vintage basis.
+
+### Known limitations
+
+- **EIA point-in-time history starts at Market Pulse's first ingestion of each series.** As-of
+  queries before that return nothing for EIA series, and revisions EIA made earlier are unknown.
+- Revisions are only as fine-grained as ingestion runs.
+- A period EIA removes permanently stays stored and counts as vanished in every snapshot that
+  covers it; past the threshold, those snapshots are rejected until an operator acts (see the
+  backlog in ADR-0011).
+- An `UNFINALIZED` run row stays `running` until operational reconciliation of stuck runs is
+  implemented (backlog).
+- HTTP error responses (e.g. 400/404 rejections) are not stored as raw payloads; the run's error
+  message and any `eia_request_rejected` issue are the record (backlog).
+
+### Tracked series
+
+| Code | EIA ID | Freq. | License |
+|---|---|---|---|
+| `wti_spot` | PET.RWTC.D | daily | `personal_use_only` |
+| `brent_spot` | PET.RBRTE.D | daily | `personal_use_only` |
+| `henry_hub_spot` | NG.RNGWHHD.D | daily | `personal_use_only` |
+| `us_crude_stocks_ex_spr` | PET.WCESTUS1.W | weekly | `public_domain` |
+| `us_crude_stocks_spr` | PET.WCSSTUS1.W | weekly | `public_domain` |
+| `us_crude_production` | PET.WCRFPUS2.W | weekly | `public_domain` |
+| `us_refinery_utilization` | PET.WPULEUS3.W | weekly | `public_domain` |
+| `us_gasoline_stocks` | PET.WGTSTUS1.W | weekly | `public_domain` |
+| `us_distillate_stocks` | PET.WDISTUS1.W | weekly | `public_domain` |
+| `l48_gas_storage` | NG.NW2_EPG0_SWO_R48_BCF.W | weekly | `public_domain` |
+| `us_dry_gas_production` | NG.N9070US2.M | monthly | `public_domain` |
+| `us_lng_exports` | NG.N9133US2.M | monthly | `public_domain` |

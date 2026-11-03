@@ -12,13 +12,21 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import select, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 import marketpulse.ingestion.observation_writer as writer_module
+import marketpulse.ingestion.runs as runs_module
 from marketpulse.core.versions import ObservationVersion
+from marketpulse.db.enums import RunStatus
 from marketpulse.db.models import IngestionRun, Observation, Series, Source
 from marketpulse.ingestion.observation_writer import write_versions
-from marketpulse.ingestion.runs import IngestionRunTracker, describe_error, record_series_versions
+from marketpulse.ingestion.runs import (
+    IngestionRunTracker,
+    RunFinalizationError,
+    describe_error,
+    record_series_versions,
+)
 from marketpulse.sources.fred.versions import vintage_instant
 
 T1 = datetime(2026, 11, 1, 15, 0, tzinfo=UTC)
@@ -191,6 +199,80 @@ def test_running_row_is_committed_before_work_starts(factory: sessionmaker[Sessi
     with IngestionRunTracker(factory, job="test.job") as run:
         assert run_row(factory, run.run_id or 0).status == "running"  # visible to others
     assert run_row(factory, run.run_id or 0).status == "succeeded"
+
+
+# --- finalization failures ----------------------------------------------------------------------
+
+
+def fail_finalization(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the tracker's final UPDATE of the run row fail (e.g. the connection dropped)."""
+
+    def broken_update(*args: object, **kwargs: object) -> object:
+        raise OperationalError(
+            "UPDATE ops.ingestion_runs", {}, Exception("connection lost api_key=LEAK-123456789")
+        )
+
+    monkeypatch.setattr(runs_module, "update", broken_update)
+
+
+def test_finalized_run_reports_its_recorded_status(factory: sessionmaker[Session]) -> None:
+    tracker = IngestionRunTracker(factory, job="test.job")
+    with tracker:
+        pass
+    assert (tracker.finalized, tracker.status, tracker.intended_status) == (
+        True,
+        RunStatus.SUCCEEDED,
+        RunStatus.SUCCEEDED,
+    )
+    assert tracker.finalization_error is None and tracker.data_committed is False
+
+
+def test_finalization_failure_after_a_committed_write_is_raised_not_hidden(
+    factory: sessionmaker[Session], ids: tuple[int, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_id, series_id = ids
+    tracker = IngestionRunTracker(factory, job="test.observations", source_id=source_id)
+    with pytest.raises(RunFinalizationError, match="already committed") as info, tracker as run:
+        run.write(series_id=series_id, versions=[v(A, None, "1.0")], retrieved_at=T1)
+        fail_finalization(monkeypatch)
+    assert isinstance(info.value.__cause__, OperationalError)
+    assert "LEAK-123456789" not in str(info.value)
+    assert tracker.status is None and not tracker.finalized
+    assert tracker.intended_status is RunStatus.SUCCEEDED
+    assert tracker.data_committed is True
+    assert tracker.finalization_error and "LEAK-123456789" not in tracker.finalization_error
+    assert [o.value for o in observations(factory)] == [Decimal("1.0")]  # committed, kept
+    row = run_row(factory, tracker.run_id or 0)
+    assert (row.status, row.finished_at) == ("running", None)  # never shown as finished
+
+
+def test_finalization_failure_after_a_body_failure_keeps_the_original_exception(
+    factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tracker = IngestionRunTracker(factory, job="test.job")
+    with pytest.raises(KeyError, match="original"), tracker:
+        fail_finalization(monkeypatch)
+        raise KeyError("original")
+    assert tracker.intended_status is RunStatus.FAILED and tracker.status is None
+    assert tracker.finalization_error is not None and tracker.data_committed is False
+    assert run_row(factory, tracker.run_id or 0).status == "running"
+
+
+def test_record_series_versions_surfaces_finalization_failure(
+    factory: sessionmaker[Session], ids: tuple[int, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_id, series_id = ids
+    fail_finalization(monkeypatch)
+    with pytest.raises(RunFinalizationError):
+        record_series_versions(
+            factory,
+            job="test.observations",
+            source_id=source_id,
+            series_id=series_id,
+            versions=[v(A, None, "1.0")],
+            retrieved_at=T1,
+        )
+    assert len(observations(factory)) == 1  # the data transaction had committed
 
 
 def test_long_error_messages_are_truncated() -> None:

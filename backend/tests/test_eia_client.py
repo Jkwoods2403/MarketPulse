@@ -527,9 +527,10 @@ def test_from_settings_requires_a_key() -> None:
         EiaClient.from_settings(Settings(_env_file=None, eia_api_key=None))  # type: ignore[call-arg]
 
 
-def test_empty_key_is_rejected() -> None:
-    with pytest.raises(EiaConfigError, match="empty"):
-        EiaClient(SecretStr(""))
+@pytest.mark.parametrize("key", ["", "   ", "\t\n"])
+def test_empty_or_blank_key_is_rejected(key: str) -> None:
+    with pytest.raises(EiaConfigError, match="empty or blank"):
+        EiaClient(SecretStr(key))
 
 
 def test_from_settings_uses_the_configured_user_agent() -> None:

@@ -17,6 +17,8 @@ Behaviors reproduced:
 
 Fault injection (`FakeEia.faults`) lets tests break individual responses (drift, inconsistent
 totals, ignored offsets, extra or missing rows, warnings) to exercise every controlled failure.
+`FakeEia.overrides` answer a request before the simulator does (any status or body, or raise a
+transport error), for failures a JSON body fault cannot express.
 All series data is synthetic unless a test loads real fixture rows.
 """
 
@@ -100,6 +102,8 @@ class FakeEia:
         self.series: dict[str, SimSeries] = {}  # facet -> series
         self.series_ids: dict[str, str] = {}  # "PET.WCESTUS1.W" -> facet
         self.faults: list[Fault] = []
+        # Answer (or raise) before the simulator; None lets the request through.
+        self.overrides: list[Callable[[httpx.Request], httpx.Response | None]] = []
         self.requests: list[httpx.Request] = []
 
     def add(self, source_series_id: str, series: SimSeries, route: SimRoute) -> None:
@@ -117,6 +121,10 @@ class FakeEia:
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
+        for override in self.overrides:
+            response = override(request)
+            if response is not None:
+                return response
         if request.url.params.get("api_key") != self.valid_key:
             return _json(
                 {

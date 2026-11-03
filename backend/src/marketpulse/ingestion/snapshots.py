@@ -141,6 +141,10 @@ class SnapshotPlan:
     issues: list[SnapshotIssue] = field(default_factory=list)  # errors reject the snapshot
     new_periods: int = 0
     in_scope: int = 0  # stored current periods inside the scope
+    # Stored periods in scope missing from the snapshot, counted even when the plan is
+    # rejected (a rejected plan never carries the periods themselves). None = not determined:
+    # the plan was rejected before periods were compared.
+    vanished_detected: int | None = None
 
     @property
     def rejected(self) -> bool:
@@ -188,7 +192,12 @@ def plan_snapshot(
     )
     if plan.rejected:
         # Keep only the diagnosis; nothing in a rejected plan can be applied.
-        return SnapshotPlan(snapshot_at=snapshot_at, issues=plan.issues, in_scope=plan.in_scope)
+        return SnapshotPlan(
+            snapshot_at=snapshot_at,
+            issues=plan.issues,
+            in_scope=plan.in_scope,
+            vanished_detected=plan.vanished_detected,
+        )
     return plan
 
 
@@ -358,6 +367,7 @@ def _plan(
         if p not in seen
     ]
     n = len(plan.vanished)
+    plan.vanished_detected = n
     if n > VANISHED_MAX_PERIODS or n > VANISHED_MAX_FRACTION * plan.in_scope:
         listed = ", ".join(v.source_period for v in plan.vanished[:10])
         error(

@@ -11,9 +11,17 @@ Outcomes:
 - partial:   no exception, but some periods were skipped because of error-level issues;
 - failed:    an exception escaped (it is re-raised); the error message is redacted.
 
-A row left `running` means the process was killed mid-run; step 1.6 will report those.
+A row left `running` means the process was killed mid-run, or the final update failed; step 1.6
+will report those.
+
+Finalization failure: if the final update of the run row fails, `status` stays None, `finalized`
+stays False, and `finalization_error` holds the (redacted) cause. If the run body had already
+raised, that original exception propagates unchanged; otherwise `RunFinalizationError` is
+raised. `data_committed` says whether a data transaction of this run had already committed, so
+callers never present committed changes as rolled back.
 """
 
+import logging
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -35,7 +43,13 @@ from marketpulse.ingestion.observation_writer import WriteResult, write_versions
 from marketpulse.ingestion.snapshot_writer import SnapshotWriteResult, write_snapshot
 from marketpulse.ingestion.snapshots import SnapshotObservation, SnapshotScope
 
+logger = logging.getLogger(__name__)
+
 MAX_ERROR_MESSAGE_CHARS = 2_000
+
+
+class RunFinalizationError(RuntimeError):
+    """The run's outcome could not be recorded; its row in ops.ingestion_runs stays `running`."""
 
 
 @lru_cache(maxsize=1)
@@ -103,7 +117,11 @@ class IngestionRunTracker:
         self.params = dict(params or {})
         self.counts = RunCounts()
         self.run_id: int | None = None
-        self.status: RunStatus | None = None
+        self.status: RunStatus | None = None  # set only once the outcome is recorded
+        self.intended_status: RunStatus | None = None  # the outcome, recorded or not
+        self.finalized = False
+        self.finalization_error: str | None = None
+        self.data_committed = False  # a data transaction of this run has committed
         self._partial = False
 
     def mark_partial(self) -> None:
@@ -130,28 +148,52 @@ class IngestionRunTracker:
         tb: TracebackType | None,
     ) -> None:
         if exc is not None:
-            self.status = RunStatus.FAILED
+            status = RunStatus.FAILED
         elif self._partial:
-            self.status = RunStatus.PARTIAL
+            status = RunStatus.PARTIAL
         else:
-            self.status = RunStatus.SUCCEEDED
-        with self._factory() as session, session.begin():
-            session.execute(
-                update(IngestionRun)
-                .where(IngestionRun.id == self.run_id)
-                .values(
-                    status=self.status.value,
-                    # clock_timestamp(): real time now, not the transaction start.
-                    finished_at=func.clock_timestamp(),
-                    rows_fetched=self.counts.fetched,
-                    rows_inserted=self.counts.inserted,
-                    rows_revised=self.counts.revised,
-                    rows_unchanged=self.counts.unchanged,
-                    error_message=describe_error(exc) if exc is not None else None,
-                    # Parameters learned during the run (e.g. windows fetched) are kept too.
-                    params=self.params,
+            status = RunStatus.SUCCEEDED
+        self.intended_status = status
+        try:
+            with self._factory() as session, session.begin():
+                session.execute(
+                    update(IngestionRun)
+                    .where(IngestionRun.id == self.run_id)
+                    .values(
+                        status=status.value,
+                        # clock_timestamp(): real time now, not the transaction start.
+                        finished_at=func.clock_timestamp(),
+                        rows_fetched=self.counts.fetched,
+                        rows_inserted=self.counts.inserted,
+                        rows_revised=self.counts.revised,
+                        rows_unchanged=self.counts.unchanged,
+                        error_message=describe_error(exc) if exc is not None else None,
+                        # Parameters learned during the run (e.g. windows fetched) are kept.
+                        params=self.params,
+                    )
                 )
+        except Exception as final_exc:
+            self.finalization_error = describe_error(final_exc)
+            committed = (
+                "data written by this run was already committed"
+                if self.data_committed
+                else "no data transaction of this run had committed"
             )
+            logger.error(
+                "run %s: could not record outcome %r (%s); the run row still says 'running': %s",
+                self.run_id,
+                status.value,
+                committed,
+                self.finalization_error,
+            )
+            if exc is not None:
+                return  # the original failure propagates unchanged
+            raise RunFinalizationError(
+                f"could not record the outcome {status.value!r} of run {self.run_id}; its row "
+                f"still says 'running' ({committed}): {self.finalization_error}"
+            ) from final_exc
+        self.status = status
+        self.finalized = True
         # Returning None re-raises any exception.
 
     def write(
@@ -177,6 +219,7 @@ class IngestionRunTracker:
                 retrieved_at=retrieved_at,
                 coverage_start=coverage_start,
             )
+        self.data_committed = True
         self.counts.add(
             fetched=result.fetched,
             inserted=result.inserted,
@@ -215,6 +258,8 @@ class IngestionRunTracker:
                 incoming=incoming,
                 incremental_window_start=incremental_window_start,
             )
+        if not result.rejected:  # a rejected snapshot commits only its issue rows
+            self.data_committed = True
         self.counts.add(
             fetched=result.fetched,
             inserted=result.inserted,

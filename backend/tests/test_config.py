@@ -70,6 +70,14 @@ def test_eia_api_key_unset_or_empty_is_none(
     assert Settings(_env_file=None).eia_api_key is None  # type: ignore[call-arg]
 
 
+def test_eia_api_key_whitespace_only_is_kept_by_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only `KEY=` means "not set"; a blank value survives as a SecretStr. The EIA job and client
+    reject it before any request (tests/db/test_eia_ingestion.py, tests/test_eia_client.py)."""
+    monkeypatch.setenv("EIA_API_KEY", "   ")
+    key = Settings(_env_file=None).eia_api_key  # type: ignore[call-arg]
+    assert key is not None and key.get_secret_value() == "   "
+
+
 def test_invalid_environment_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MARKETPULSE_ENV", "staging-typo")
     with pytest.raises(ValueError, match="marketpulse_env"):

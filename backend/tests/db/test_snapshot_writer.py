@@ -356,6 +356,8 @@ def test_rejected_snapshot_changes_no_observations_or_tracked_issues(
     assert result.rejected
     assert [i.check_name for i in result.issues] == ["vanished_limit"]
     assert (result.inserted, result.revised, result.confirmed, result.vanished) == (0, 0, 0, 0)
+    assert result.vanished_detected == 4  # reported although nothing was applied
+    assert (result.vanished_opened, result.vanished_updated) == (0, 0)
     assert checksum(session, series_id) == before
     after = issues(session, series_id)
     assert [(i.id, i.occurrences, i.last_detected_at) for i in after[:1]] == tracked

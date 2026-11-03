@@ -54,6 +54,28 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Re-fetch the complete history even if data is already stored",
     )
+    eia = ingest_sub.add_parser(
+        "eia",
+        help="Ingest EIA series as first-seen snapshots (default: all catalog series)",
+        description="Fetch EIA observations and record them as first-seen snapshots (EIA "
+        "publishes no vintages; version times are when Market Pulse retrieved the data). "
+        "Series with no stored data get a full snapshot; others an incremental one "
+        "(lookback 90 days / 26 weeks / 26 months). "
+        "Exit codes: 0 all succeeded, 1 any series failed, 2 some series partial "
+        "(snapshot rejected, nothing changed).",
+    )
+    eia.add_argument(
+        "--series",
+        nargs="+",
+        metavar="CODE",
+        help="Catalog series codes to ingest (e.g. wti_spot l48_gas_storage); "
+        "default: all EIA series",
+    )
+    eia.add_argument(
+        "--full",
+        action="store_true",
+        help="Take a full-history snapshot (reconciliation) even if data is already stored",
+    )
 
     return parser
 
@@ -99,6 +121,66 @@ def _ingest_fred_command(series: list[str] | None, *, full: bool) -> int:
     print(
         f"{len(summary.outcomes)} series: {totals['succeeded']} succeeded, "
         f"{totals['partial']} partial, {totals['failed']} failed"
+    )
+    return summary.exit_code
+
+
+def _ingest_eia_command(series: list[str] | None, *, full: bool) -> int:
+    from marketpulse.core.config import get_settings
+    from marketpulse.db.session import make_engine, make_session_factory
+    from marketpulse.ingestion.eia import UNFINALIZED, EiaIngestionConfigError, ingest_eia
+    from marketpulse.sources.catalog import CatalogError
+    from marketpulse.sources.eia.client import EiaConfigError
+
+    settings = get_settings()
+    engine = make_engine(settings)
+    try:
+        summary = ingest_eia(
+            settings=settings,
+            session_factory=make_session_factory(engine),
+            series_codes=series,
+            full=full,
+        )
+    except (EiaIngestionConfigError, EiaConfigError, CatalogError) as exc:
+        print(f"error: {exc}")
+        return 1
+    finally:
+        engine.dispose()
+
+    header = (
+        f"{'series':<24} {'mode':<11} {'status':<11} {'fetched':>8} {'inserted':>8} "
+        f"{'revised':>7} {'unchanged':>9} {'vanished':>8} {'issues':>6}  run"
+    )
+    print(header)
+    print("-" * len(header))
+    for o in summary.outcomes:
+        vanished = "-" if o.vanished is None else str(o.vanished)  # "-": not determined
+        status = o.status.upper() if o.status == UNFINALIZED else o.status  # stands out
+        print(
+            f"{o.code:<24} {o.mode:<11} {status:<11} {o.fetched:>8} {o.inserted:>8} "
+            f"{o.revised:>7} {o.unchanged:>9} {vanished:>8} {o.issues:>6}  {o.run_id or '-'}"
+        )
+    for o in summary.outcomes:
+        if o.rejected:
+            print(f"  {o.code}: snapshot rejected; no observations changed (see run issues)")
+        if o.error:
+            print(f"  {o.code}: {o.error}")
+        if o.status == UNFINALIZED:
+            committed = (
+                "its observation changes WERE COMMITTED and are kept"
+                if o.observations_committed
+                else "no observations were changed"
+            )
+            print(
+                f"  {o.code}: UNFINALIZED: run {o.run_id} could not record its outcome and still "
+                f"says 'running'; {committed}: {o.finalization_error}"
+            )
+    statuses = ("succeeded", "partial", "failed", UNFINALIZED)
+    totals = {s: sum(o.status == s for o in summary.outcomes) for s in statuses}
+    print(
+        f"{len(summary.outcomes)} series: {totals['succeeded']} succeeded, "
+        f"{totals['partial']} partial, {totals['failed']} failed"
+        + (f", {totals[UNFINALIZED]} unfinalized" if totals[UNFINALIZED] else "")
     )
     return summary.exit_code
 
@@ -185,6 +267,8 @@ def main(argv: list[str] | None = None) -> int:
         return _catalog_command(args.catalog_command, dry_run=getattr(args, "dry_run", False))
     elif args.command == "ingest" and args.ingest_command == "fred":
         return _ingest_fred_command(args.series, full=args.full)
+    elif args.command == "ingest" and args.ingest_command == "eia":
+        return _ingest_eia_command(args.series, full=args.full)
     return 0
 
 

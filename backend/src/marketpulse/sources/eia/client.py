@@ -14,15 +14,21 @@ totals, no duplicate periods, ascending order, the final count == total, metadat
 warning rule (only "incomplete return" on a page that is not the last is tolerated).
 
 Every raw response is passed to the optional `on_response` hook *before* parsing (warnings
-included, since they are part of the body), so the ingestion layer can preserve it. Rate
+included, since they are part of the body), so the ingestion layer can preserve it.
+`fetch_series_pages` returns the validated rows grouped by the page that contained them, with
+each page's offset, redacted URL, SHA-256 of the exact response body, and retrieval time, so
+every observation can be traced to its raw response; `fetch_series` returns the same rows flat. Rate
 limiting (1 request/second, bursts of 5), retries (429/5xx/transport errors), timeouts, and key
 redaction come from ProviderHttpClient.
 """
 
+import hashlib
 import json
 import math
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from datetime import datetime
 from types import TracebackType
 from typing import Self
 
@@ -70,6 +76,17 @@ DATASET_METADATA = "metadata"
 ResponseHook = Callable[[str, FetchResult], None]
 
 
+@dataclass(frozen=True)
+class EiaFetchedPage:
+    """One validated data page and where it came from."""
+
+    offset: int  # the offset this page was requested at
+    url: str  # redacted request URL (as passed to `on_response` and stored)
+    sha256: str  # of the exact response body
+    retrieved_at: datetime  # UTC, when the response was received
+    rows: tuple[EiaRow, ...]  # this page's rows, in response order
+
+
 class EiaConfigError(ValueError):
     """The EIA client cannot be configured (e.g. EIA_API_KEY is not set)."""
 
@@ -95,8 +112,8 @@ class EiaClient:
         transport: httpx.BaseTransport | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
-        if not api_key.get_secret_value():
-            raise EiaConfigError("EIA API key is empty")
+        if not api_key.get_secret_value().strip():
+            raise EiaConfigError("EIA API key is empty or blank")
         config = ProviderClientConfig(
             base_url=EIA_BASE_URL,
             user_agent=user_agent,
@@ -148,6 +165,25 @@ class EiaClient:
     ) -> list[EiaRow]:
         """All rows of one catalogued series (optionally within [start, end], EIA period strings),
         fully validated. Raises a controlled-failure error instead of returning partial data."""
+        pages = self.fetch_series_pages(
+            expected, start=start, end=end, page_size=page_size, allow_empty=allow_empty
+        )
+        return [row for page in pages for row in page.rows]
+
+    def fetch_series_pages(
+        self,
+        expected: EiaSeriesExpectation,
+        *,
+        start: str | None = None,
+        end: str | None = None,
+        page_size: int = MAX_ROWS_PER_REQUEST,
+        allow_empty: bool = False,
+    ) -> list[EiaFetchedPage]:
+        """Like `fetch_series`, but grouped by response page with each page's provenance.
+
+        Pages are returned only after the complete set passed `assemble_pages`; their rows,
+        concatenated, are exactly what `fetch_series` returns.
+        """
         if not 1 <= page_size <= MAX_ROWS_PER_REQUEST:
             raise ValueError(f"page_size must be between 1 and {MAX_ROWS_PER_REQUEST}")
         base: dict[str, str] = {
@@ -164,6 +200,7 @@ class EiaClient:
             base["end"] = end
 
         pages: list[tuple[int, EiaDataPage]] = []
+        results: list[FetchResult] = []
         received = 0
         max_pages: int | None = None
         while True:
@@ -173,6 +210,7 @@ class EiaClient:
             page = parse_data_page(result.content)
             self._check_echo(page, expected, result.url)
             pages.append((received, page))
+            results.append(result)
             if max_pages is None:
                 max_pages = math.ceil(page.total / page_size) + 1
             if len(page.rows) > page_size:
@@ -193,7 +231,20 @@ class EiaClient:
                         f"total {page.total}; pagination is not advancing"
                     ]
                 )
-        return assemble_pages(pages, expected, allow_empty=allow_empty)
+        rows = assemble_pages(pages, expected, allow_empty=allow_empty)
+        fetched = [
+            EiaFetchedPage(
+                offset=offset,
+                url=result.url,
+                sha256=hashlib.sha256(result.content).hexdigest(),
+                retrieved_at=result.retrieved_at,
+                rows=tuple(page.rows),
+            )
+            for (offset, page), result in zip(pages, results, strict=True)
+        ]
+        if [row for page in fetched for row in page.rows] != rows:  # pragma: no cover
+            raise EiaIncompleteError([f"{expected.code}: page grouping does not match the rows"])
+        return fetched
 
     # --- series-ID route (resolution and verification only) -----------------------------------
 

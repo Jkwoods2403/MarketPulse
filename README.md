@@ -8,7 +8,9 @@ It is both a daily monitoring tool and a data engineering and quantitative resea
 
 > **Status: Milestone 1 (Data core) in progress.** FRED ingestion is complete: 12 rates, FX,
 > and macro series with full revision history (182,232 stored versions, verified against the
-> live API). The EIA connector is next. There is no API or dashboard for the data yet.
+> live API). The EIA connector (12 energy series, first-seen snapshot versioning) is built and
+> tested but has not yet been run against the live API. There is no API or dashboard for the
+> data yet.
 
 ## Principles
 
@@ -102,10 +104,32 @@ The first run for a series is a full backfill of its version history; later runs
 incremental. The command prints a per-series summary and exits 0 (all succeeded), 1 (a series
 failed), or 2 (a series was partial because of data conflicts).
 
+EIA needs a free API key (<https://www.eia.gov/opendata/register.php>), added to `.env` as
+`EIA_API_KEY=...`. Then, from `backend/`:
+
+```bash
+uv run marketpulse ingest eia                              # all 12 EIA series
+uv run marketpulse ingest eia --series l48_gas_storage     # selected series (catalog codes)
+uv run marketpulse ingest eia --series wti_spot --full     # full-history snapshot
+```
+
+EIA publishes no vintages, so each run records a **first-seen snapshot**: version times are
+when Market Pulse retrieved the values, not EIA's publication times, and EIA history starts at
+the first ingestion ([ADR-0011](docs/adr/0011-first-seen-snapshot-versioning.md)). The first run
+for a series takes a full snapshot; later runs are incremental (90 days, 26 weeks, or 26 months
+back). A snapshot in which too many stored periods disappear (more than 5, or more than 1% of
+the periods checked) is rejected without changing anything, and the run exits 2 (partial). Exit
+code 1 means a series failed or is `UNFINALIZED` (its outcome could not be recorded; the CLI
+says whether its observations had already been committed). A missing or blank `EIA_API_KEY`
+stops the job before any request.
+WTI, Brent, and Henry Hub spot prices are Refinitiv data classified `personal_use_only`: they
+are ingested for personal use only and must not be redistributed.
+
 **Provenance.** Every successful provider response is saved byte-exact and compressed under
 `data/raw/` and recorded in `ops.raw_payloads` (redacted URL, retrieval time, SHA-256) *before*
 it is parsed. Each stored value links to its ingestion run, every revision is kept as a separate
-version with its validity period, and missing values stay missing. Details per source, including
+version with its validity period, and missing values stay missing. Each EIA value also links to
+the exact raw response page that contained it. Details per source, including
 licensing and known limitations, are in [`docs/data-sources.md`](docs/data-sources.md).
 
 ### Checks
@@ -126,7 +150,7 @@ pnpm lint && pnpm typecheck && pnpm build
 | # | Milestone | Status |
 |---|---|---|
 | 0 | Foundation: repo structure, tooling, CI | ✅ |
-| 1 | Data core and the FRED and EIA connectors | In progress: FRED ✅, EIA next |
+| 1 | Data core and the FRED and EIA connectors | In progress: FRED ✅, EIA connector built (not yet run live) |
 | 2 | API v1: series, observations, freshness | |
 | 3 | Dashboard v1 | |
 | 4 | ERCOT and weather | |
@@ -137,6 +161,15 @@ pnpm lint && pnpm typecheck && pnpm build
 | 9 | Market Connections and Analytics Lab v1 | |
 | 10 | Forecasting and machine learning | |
 | 11 | Deployment | |
+
+**Deferred work (backlog):**
+
+- An audited operator decision to retire a period EIA removed permanently (until then, such a
+  period keeps counting as vanished and can cause snapshots to be rejected; ADR-0011).
+- Consolidate the FRED and EIA raw-response recorders into one shared component.
+- Use one clock for a new vanished-period issue's `created_at` and `last_detected_at`.
+- A series column on raw payloads, if a run ever needs to cover more than one series.
+- Scheduled ingestion (no scheduler exists yet).
 
 ## Data and licensing
 

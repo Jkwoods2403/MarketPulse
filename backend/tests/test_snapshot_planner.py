@@ -235,6 +235,43 @@ def test_empty_response_against_full_history_is_rejected() -> None:
     assert checks(p) == ["vanished_limit"]
     assert p.in_scope == 500
     assert_no_actions(p)
+    assert p.vanished_detected == 500
+
+
+def test_vanished_count_survives_rejection_without_the_periods() -> None:
+    history = [stored(i, "1") for i in range(200)]
+    accepted = plan(history, [obs(i, "1") for i in range(200) if i != 7])  # 1 of 200 = 0.5%
+    assert (accepted.rejected, accepted.vanished_detected, len(accepted.vanished)) == (False, 1, 1)
+
+    rejected = plan(history, [obs(i, "1") for i in range(200) if not 10 <= i < 16])  # 6 > 5
+    assert checks(rejected) == ["vanished_limit"]
+    assert rejected.vanished_detected == 6
+    assert_no_actions(rejected)  # the count is reported; the periods cannot be applied
+
+    none_missing = plan(history, [obs(i, "1") for i in range(200)])
+    assert none_missing.vanished_detected == 0  # zero is known, not unknown
+
+
+def test_vanished_count_is_known_when_another_per_period_error_rejects() -> None:
+    history = [stored(i, "1") for i in range(200)]
+    incoming = [obs(i, "1") for i in range(200) if i != 3]
+    incoming[0] = obs(0, "1", source_period="2026-01-03")  # well-formed, but relabelled
+    p = plan(history, incoming)
+    assert checks(p) == ["source_period_conflict"]
+    assert p.vanished_detected == 1  # periods were compared, so the count is known
+
+
+def test_vanished_count_is_unknown_when_rejected_before_periods_are_compared() -> None:
+    history = [stored(i, "1", start=T2) for i in range(40)]
+    stale = plan(history, [obs(i, "1") for i in range(30)], at=T1)  # older than stored history
+    assert "stale_snapshot" in checks(stale)
+    assert stale.vanished_detected is None  # not determined, which is different from 0
+
+    bad_scope = plan(
+        history, [obs(i, "1") for i in range(40)], scope=SnapshotScope(start="2026-01")
+    )
+    assert "scope_format_mismatch" in checks(bad_scope)
+    assert bad_scope.vanished_detected is None
 
 
 # --- whole-snapshot rejections ------------------------------------------------------------------

@@ -87,7 +87,10 @@ class SnapshotWriteResult:
     new_periods: int = 0
     revised: int = 0  # current versions closed by a revision
     confirmed: int = 0  # current versions confirmed unchanged
-    vanished: int = 0  # stored periods in scope missing from the snapshot
+    vanished: int = 0  # stored periods in scope missing from an applied snapshot
+    # Missing periods detected, applied or rejected; None = not determined (rejected before
+    # periods were compared, e.g. a stale snapshot found by the planner or a format error).
+    vanished_detected: int | None = None
     vanished_opened: int = 0
     vanished_updated: int = 0
     vanished_resolved: int = 0
@@ -140,7 +143,9 @@ def write_snapshot(
     )
     plan = _apply_stale_guard(session, series_id, plan)
 
-    result = SnapshotWriteResult(fetched=len(incoming), issues=list(plan.issues))
+    result = SnapshotWriteResult(
+        fetched=len(incoming), issues=list(plan.issues), vanished_detected=plan.vanished_detected
+    )
     if plan.rejected:
         result.rejected = True
         _add_issues(session, ingestion_run_id, series_id, plan.issues)
@@ -258,7 +263,10 @@ def _apply_stale_guard(session: Session, series_id: int, plan: SnapshotPlan) -> 
         ERROR,
     )
     return SnapshotPlan(
-        snapshot_at=plan.snapshot_at, issues=[*plan.issues, stale], in_scope=plan.in_scope
+        snapshot_at=plan.snapshot_at,
+        issues=[*plan.issues, stale],
+        in_scope=plan.in_scope,
+        vanished_detected=plan.vanished_detected,
     )
 
 
