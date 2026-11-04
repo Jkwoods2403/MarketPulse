@@ -1,8 +1,13 @@
 """Command-line entry point: `uv run marketpulse <command>`."""
 
 import argparse
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 from marketpulse import __version__
+
+if TYPE_CHECKING:
+    from marketpulse.ingestion.verify import VerifyReport
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -77,7 +82,116 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Take a full-history snapshot (reconciliation) even if data is already stored",
     )
 
+    verify = sub.add_parser(
+        "verify",
+        help="Check stored observations and lineage for integrity (read-only)",
+        description="Run every integrity check on the stored data in one read-only "
+        "transaction: version overlaps and gaps, current versions, runs that failed or never "
+        "finished, EIA provenance and first-seen times, FRED vintage times, tracked issues, and "
+        "credentials in stored text. Never changes the database or any file. "
+        "With --replay, each replayed version is counted once, in the first state that "
+        "applies: ERROR (a mismatch), UNVERIFIED (evidence missing, e.g. a raw file), "
+        "UNSUPPORTED (its creation matched, but a later closure or confirmation by another run "
+        "was not replayed), else VERIFIED (creation, provenance, and stored history matched). "
+        "Exit codes, first that applies: 1 any error; 2 warnings, no errors; 3 no errors or "
+        "warnings, but some replayed versions are UNVERIFIED or UNSUPPORTED; 0 nothing found "
+        "(with --replay: every replayed version VERIFIED; without it, only the SQL checks ran).",
+    )
+    verify.add_argument(
+        "--series",
+        nargs="+",
+        metavar="CODE",
+        help="Limit series-level checks to these catalog codes (default: every series)",
+    )
+    verify.add_argument(
+        "--replay",
+        action="store_true",
+        help="Also re-read the stored raw pages under MARKETPULSE_DATA_DIR (read-only, "
+        "hash-verified) and compare them with the versions they produced",
+    )
+
     return parser
+
+
+def _print_verify_report(report: "VerifyReport", data_dir: Path | None) -> None:
+    def count(value: int | None) -> str:
+        return "-" if value is None else f"{value:,}"
+
+    header = (
+        f"{'check':<32} {'status':<11} {'errors':>7} {'warnings':>8} {'unverified':>10} "
+        f"{'unsupported':>11} {'verified':>8}"
+    )
+    print(header)
+    print("-" * len(header))
+    for c in report.checks:
+        replay = c.verified is not None  # only replay checks count items in every state
+        print(
+            f"{c.name:<32} {c.status:<11} {c.errors:>7,} {c.warnings:>8,} "
+            f"{count(c.unverified if replay else None):>10} "
+            f"{count(c.unsupported if replay else None):>11} {count(c.verified):>8}"
+        )
+    for c in report.checks:
+        if c.samples:
+            print(
+                f"\n{c.name}: {c.description} ({len(c.samples)} of {c.findings:,} finding(s) shown)"
+            )
+            for sample in c.samples:
+                print(f"  {sample}")
+
+    scope = ", ".join(report.series_codes) if report.series_codes else "all series"
+    print(
+        f"\nverify ({scope}): {report.series} series, {report.versions:,} versions, "
+        f"{report.raw_payloads:,} raw payloads; {len(report.checks)} checks, "
+        f"{report.errors:,} errors, {report.warnings:,} warnings"
+    )
+    if report.replayed:
+        replay_errors = sum(c.errors for c in report.checks if c.verified is not None)
+        print(
+            f"replay (versions): VERIFIED {report.verified:,}, ERROR {replay_errors:,}, "
+            f"UNVERIFIED {report.unverified:,}, UNSUPPORTED {report.unsupported:,}"
+        )
+        if report.unsupported:
+            print(
+                "  UNSUPPORTED: creation and source page matched, but a later closure or "
+                "confirmation by another run was not replayed; not counted as verified"
+            )
+        if data_dir is not None and not data_dir.is_dir():
+            print(f"note: raw-payload directory {data_dir} does not exist")
+    else:
+        print("replay: not run (add --replay to compare versions with their stored raw pages)")
+    print("read-only; nothing was changed")
+
+
+def _verify_command(series: list[str] | None, *, replay: bool = False) -> int:
+    from marketpulse.core.config import get_settings
+    from marketpulse.db.session import make_engine, make_session_factory
+    from marketpulse.ingestion.raw_store import RawPayloadStore
+    from marketpulse.ingestion.verify import VerifyConfigError, verify
+
+    settings = get_settings()
+    secrets = [
+        key.get_secret_value()
+        for key in (settings.fred_api_key, settings.eia_api_key, settings.postgres_password)
+        if key is not None
+    ]
+    # Read-only: RawPayloadStore only resolves the path here and reads files during replay.
+    raw_store = RawPayloadStore(settings.marketpulse_data_dir) if replay else None
+    engine = make_engine(settings)
+    try:
+        report = verify(
+            make_session_factory(engine),
+            series_codes=series,
+            secrets=secrets,
+            raw_store=raw_store,
+        )
+    except VerifyConfigError as exc:
+        print(f"error: {exc}")
+        return 1
+    finally:
+        engine.dispose()
+
+    _print_verify_report(report, raw_store.data_dir if raw_store else None)
+    return report.exit_code
 
 
 def _ingest_fred_command(series: list[str] | None, *, full: bool) -> int:
@@ -265,6 +379,8 @@ def main(argv: list[str] | None = None) -> int:
             migrations.current()
     elif args.command == "catalog":
         return _catalog_command(args.catalog_command, dry_run=getattr(args, "dry_run", False))
+    elif args.command == "verify":
+        return _verify_command(args.series, replay=args.replay)
     elif args.command == "ingest" and args.ingest_command == "fred":
         return _ingest_fred_command(args.series, full=args.full)
     elif args.command == "ingest" and args.ingest_command == "eia":

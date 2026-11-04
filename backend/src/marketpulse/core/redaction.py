@@ -86,6 +86,31 @@ def redact_headers(
     return {k: (REDACTED if k.lower() in names else v) for k, v in headers.items()}
 
 
+def exposed_credential_parameters(text: str) -> list[str]:
+    """Names of credential parameters in `text` that carry an actual value (for auditing).
+
+    A parameter counts only when it has a non-empty value other than REDACTED: an empty value
+    (`token=`) or an already-redacted one exposes nothing. Values are never returned.
+    """
+    names = []
+    for match in _SECRET_PARAM_IN_TEXT.finditer(text):
+        prefix = match.group(1)  # "<name>="
+        value = match.group(0)[len(prefix) :]
+        if value and value != REDACTED:
+            names.append(prefix[:-1].lower())
+    return names
+
+
+def contains_secret(text: str, secrets: Iterable[str]) -> bool:
+    """Whether any known secret (raw or URL-encoded) appears in `text` (for auditing)."""
+    return any(
+        form in text
+        for secret in secrets
+        if len(secret) >= _MIN_SECRET_LENGTH
+        for form in {secret, quote(secret, safe=""), quote_plus(secret)}
+    )
+
+
 def redact_text(text: str, secrets: Iterable[str] = ()) -> str:
     """Remove known secret values (raw and URL-encoded) and credential query params from text."""
     for secret in secrets:
