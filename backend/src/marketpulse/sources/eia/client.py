@@ -246,6 +246,47 @@ class EiaClient:
             raise EiaIncompleteError([f"{expected.code}: page grouping does not match the rows"])
         return fetched
 
+    def fetch_page(
+        self, expected: EiaSeriesExpectation, *, offset: int, length: int
+    ) -> EiaDataPage:
+        """One page of the native-route request `fetch_series_pages` makes (ascending by period).
+
+        Used by the read-only probe to sample a series' first and last rows. EIA must have
+        executed the request as asked: frequency, series facet, sort, offset, and length.
+        Completeness is NOT checked here; callers that need all rows use `fetch_series_pages`.
+        """
+        if not 1 <= length <= MAX_ROWS_PER_REQUEST:
+            raise ValueError(f"length must be between 1 and {MAX_ROWS_PER_REQUEST}")
+        if offset < 0:
+            raise ValueError("offset must not be negative")
+        params = {
+            "frequency": expected.frequency,
+            "data[0]": "value",
+            "facets[series][0]": expected.facet_series,
+            "sort[0][column]": "period",
+            "sort[0][direction]": "asc",
+            "length": str(length),
+            "offset": str(offset),
+        }
+        result = self._get(f"{expected.route}/data", params, DATASET_DATA)
+        page = parse_data_page(result.content)
+        self._check_echo(page, expected, result.url)
+        executed = {key: page.echo.get(key) for key in ("offset", "length")}
+        asked = {"offset": offset, "length": length}
+        wrong = [
+            f"{key} {executed[key]!r}, requested {asked[key]}"
+            for key in asked
+            if executed[key] is not None and str(executed[key]) != str(asked[key])
+        ]
+        if wrong:
+            raise EiaMetadataError(
+                [
+                    f"{expected.code}: EIA did not execute the request as asked "
+                    f"({'; '.join(wrong)}) at {result.url}"
+                ]
+            )
+        return page
+
     # --- series-ID route (resolution and verification only) -----------------------------------
 
     def resolve_series_id(self, source_series_id: str) -> dict[str, str]:

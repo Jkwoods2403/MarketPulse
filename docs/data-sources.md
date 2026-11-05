@@ -185,6 +185,36 @@ simulator of that behavior; **no EIA data has been ingested from the live API ye
 - **Periods:** daily and weekly periods are `YYYY-MM-DD` (weekly = the week's last day, a Friday
   for every tracked weekly series); monthly periods are `YYYY-MM`. Other frequencies are refused.
 
+### Read-only probe (`marketpulse probe eia`)
+
+Before ingesting, the probe checks every catalogued series against the live API and stores
+nothing. Per series it checks:
+- that the route still offers the series' frequency and date format, a `series` facet, and a
+  `value` column;
+- that the series-ID route still maps to the catalogued route, facet, and frequency;
+- that the first and last rows (ascending, one row each) match the catalogued frequency, date
+  format, series, description, and units.
+
+It reports the row count, the first and last periods, and how old the latest period is,
+compared with `max_staleness_days`.
+
+- **Requests:** at most 4 per series, with route metadata fetched once per route. All 12 series
+  take 43 requests at the client's 1 request/second.
+- **Stores nothing:**
+  - the probe lives in the `sources` layer, and an import-linter contract forbids that layer from
+    importing the database or ingestion code, so it opens no database connection, creates no
+    ingestion run, and records no raw payload;
+  - responses are parsed in memory and discarded.
+- **Never shows values, for any series.** The report holds only metadata, counts, and periods. A
+  malformed `value` field is reported with the value withheld. The three Refinitiv/LSEG spot-price
+  series are flagged as licensed for personal use only.
+- **Stops early:** an invalid key (HTTP 401/403) or an exhausted rate limit (429 after retries)
+  stops the probe; the remaining series are reported as not probed.
+- **Exit codes:**
+  - 0: every series ok;
+  - 1: any series failed, or a configuration error such as a missing key or an unknown code;
+  - 2: warnings only, meaning a series is older than its `max_staleness_days`.
+
 ### How Market Pulse versions EIA data (first-seen snapshots)
 
 EIA publishes **no vintages**, so Market Pulse records what it saw and when

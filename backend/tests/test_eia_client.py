@@ -53,7 +53,8 @@ STORAGE = expectation_for(SPECS["l48_gas_storage"])
 
 
 def business_days(start: date, n: int) -> list[str]:
-    out, d = [], start
+    out: list[str] = []
+    d = start
     while len(out) < n:
         if d.weekday() < 5:
             out.append(d.isoformat())
@@ -142,7 +143,7 @@ class Harness:
         return [dict(r.url.params) for r in self.fake.data_requests()]
 
 
-def fault_on_offset(offset: int, change: Callable[[dict[str, Any]], None]) -> Callable[..., Any]:
+def fault_on_offset(offset: int, change: Callable[[dict[str, Any]], object]) -> Callable[..., Any]:
     """A simulator fault applied only to the data page requested at `offset`."""
 
     def fault(request: httpx.Request, body: dict[str, Any]) -> dict[str, Any]:
@@ -524,7 +525,7 @@ def test_route_metadata() -> None:
 
 def test_from_settings_requires_a_key() -> None:
     with pytest.raises(EiaConfigError, match="EIA_API_KEY is not set"):
-        EiaClient.from_settings(Settings(_env_file=None, eia_api_key=None))  # type: ignore[call-arg]
+        EiaClient.from_settings(Settings(_env_file=None, eia_api_key=None))
 
 
 @pytest.mark.parametrize("key", ["", "   ", "\t\n"])
@@ -537,7 +538,7 @@ def test_from_settings_uses_the_configured_user_agent() -> None:
     fake = FakeEia(KEY)
     settings = Settings(
         _env_file=None,
-        eia_api_key=SecretStr(KEY),  # type: ignore[call-arg]
+        eia_api_key=SecretStr(KEY),
         http_user_agent="MarketPulse/0.1 (tests@example.invalid)",
     )
     with (
