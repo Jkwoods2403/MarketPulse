@@ -1,6 +1,10 @@
 """Fixtures for tests that need a real PostgreSQL database.
 
 These tests use a dedicated `<POSTGRES_DB>_test` database, recreated for each test session.
+tests/isolation.py has already renamed POSTGRES_DB to that name. It refuses any connection to a
+host that is not local, to a port other than POSTGRES_PORT, or to a database whose name does
+not end in `_test` (except the `postgres` maintenance database, used here only to create and
+drop the test database).
 If PostgreSQL is not reachable they are skipped, unless MARKETPULSE_REQUIRE_DB=1 (set in CI),
 in which case they fail, so database tests can never be skipped silently in CI.
 """
@@ -14,6 +18,12 @@ from psycopg import sql
 from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from isolation import (
+    check_database_host,
+    check_database_name,
+    check_database_port,
+    maintenance_connection,
+)
 from marketpulse.core.config import Settings
 from marketpulse.db import migrations
 from marketpulse.db.session import make_engine, make_session_factory
@@ -26,8 +36,8 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             item.add_marker(pytest.mark.db)
 
 
-def _admin_conninfo(settings: Settings) -> str:
-    return psycopg.conninfo.make_conninfo(
+def _admin_connect(settings: Settings) -> psycopg.Connection[tuple[object, ...]]:
+    conninfo = psycopg.conninfo.make_conninfo(
         host=settings.postgres_host,
         port=settings.postgres_port,
         user=settings.postgres_user,
@@ -35,6 +45,8 @@ def _admin_conninfo(settings: Settings) -> str:
         dbname="postgres",
         connect_timeout=3,
     )
+    with maintenance_connection():
+        return psycopg.connect(conninfo, autocommit=True)
 
 
 @pytest.fixture(scope="session")
@@ -45,9 +57,12 @@ def db_settings() -> Settings:
 @pytest.fixture(scope="session")
 def test_db_name(db_settings: Settings) -> Iterator[str]:
     """Create a fresh, empty test database for the session; drop it afterwards."""
-    name = f"{db_settings.postgres_db}_test"
+    name = db_settings.postgres_db  # already `<POSTGRES_DB>_test` (tests/isolation.py)
+    check_database_host(db_settings.postgres_host)  # fail fast on a remote server
+    check_database_port(db_settings.postgres_port)  # ... or an unexpected port
+    check_database_name(name)  # never create or drop anything else
     try:
-        admin = psycopg.connect(_admin_conninfo(db_settings), autocommit=True)
+        admin = _admin_connect(db_settings)
     except psycopg.OperationalError as exc:
         if os.environ.get("MARKETPULSE_REQUIRE_DB") == "1":
             pytest.fail(f"PostgreSQL required but unreachable: {exc}")
@@ -61,7 +76,7 @@ def test_db_name(db_settings: Settings) -> Iterator[str]:
     try:
         yield name
     finally:
-        with psycopg.connect(_admin_conninfo(db_settings), autocommit=True) as admin:
+        with _admin_connect(db_settings) as admin:
             admin.execute(
                 sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name))
             )
