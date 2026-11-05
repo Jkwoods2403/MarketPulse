@@ -1,6 +1,15 @@
+from urllib.parse import quote, quote_plus
+
 import pytest
 
-from marketpulse.core.redaction import REDACTED, redact_headers, redact_text, redact_url
+from marketpulse.core.redaction import (
+    REDACTED,
+    contains_secret,
+    exposed_credential_parameters,
+    redact_headers,
+    redact_text,
+    redact_url,
+)
 
 SECRET = "TEST-SECRET-9f8e7d6c5b4a"  # synthetic test value
 
@@ -82,3 +91,39 @@ def test_redact_text_does_not_match_inside_longer_words(text: str) -> None:
 
 def test_redact_text_ignores_very_short_secrets() -> None:
     assert redact_text("a b c", ["a"]) == "a b c"
+
+
+# --- auditing helpers (used by `marketpulse verify`) ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "names"),
+    [
+        (f"https://x.example/data?series_id=A&api_key={SECRET}&n=1", ["api_key"]),
+        (f"GET /?TOKEN={SECRET}", ["token"]),
+        (f"password={SECRET} and key={SECRET}", ["password", "key"]),
+        (f"https://x.example/?api_key={REDACTED}&offset=0", []),  # already redacted
+        ("https://x.example/?token=&offset=0", []),  # empty value: nothing exposed
+        ("error: token= was empty", []),
+        ("token=", []),
+        ("monkey=banana turnkey=yes my_api_key=x", []),  # not credential parameters
+        ('{"api_key": "x", "mode": "full"}', []),  # JSON, not a parameter assignment
+    ],
+)
+def test_exposed_credential_parameters(text: str, names: list[str]) -> None:
+    assert exposed_credential_parameters(text) == names
+
+
+def test_exposed_credential_parameters_never_returns_values() -> None:
+    found = exposed_credential_parameters(f"?api_key={SECRET}")
+    assert found == ["api_key"] and all(SECRET not in name for name in found)
+
+
+def test_contains_secret_raw_and_url_encoded() -> None:
+    secret = "s3cret/with+chars=="
+    assert contains_secret(f"x {secret} y", [secret])
+    assert contains_secret(f"?k={quote(secret, safe='')}", [secret])
+    assert contains_secret(f"?k={quote_plus(secret)}", [secret])
+    assert not contains_secret("nothing here", [secret])
+    assert not contains_secret("a b c", ["a"])  # very short values are ignored
+    assert not contains_secret("anything", [])

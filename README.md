@@ -132,6 +132,42 @@ version with its validity period, and missing values stay missing. Each EIA valu
 the exact raw response page that contained it. Details per source, including
 licensing and known limitations, are in [`docs/data-sources.md`](docs/data-sources.md).
 
+### Verifying stored data
+
+From `backend/`:
+
+```bash
+uv run marketpulse verify                     # SQL integrity checks over all series
+uv run marketpulse verify --series ust_10y    # limit series-level checks (catalog codes)
+uv run marketpulse verify --replay            # also replay the stored raw pages
+```
+
+`verify` is **read-only**. It runs every check in one `REPEATABLE READ, READ ONLY` transaction
+that is rolled back at the end. With `--replay` it only reads the raw files (hash-verified). It
+never calls a provider and never prints credential values.
+
+The SQL checks cover version overlaps and gaps, current versions, failed or unfinalized runs,
+provenance, timestamps, tracked issues, and credentials in stored text.
+
+`--replay` compares every stored version with the raw pages it came from. It counts each version
+in exactly one state, by precedence:
+
+1. **ERROR**: a mismatch;
+2. **UNVERIFIED**: evidence is missing;
+3. **UNSUPPORTED**: the creation matched, but a later EIA confirmation, or a FRED closure or
+   confirmation, cannot be replayed;
+4. **VERIFIED**: creation, provenance, and any closure all matched.
+
+Exit codes, the first that applies:
+
+- **1**: any error;
+- **2**: warnings;
+- **3**: some versions UNVERIFIED or UNSUPPORTED;
+- **0**: nothing found.
+
+On real data, `verify --replay` normally exits 3 once values have been re-confirmed. Details,
+the full list of checks, and limitations are in [`docs/verification.md`](docs/verification.md).
+
 ### Checks
 
 ```bash

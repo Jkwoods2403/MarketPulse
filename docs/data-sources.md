@@ -110,6 +110,10 @@ Series are independent: a failure is recorded on that series' run and the job co
   published before FRED began tracking vintages are marked as known only from that date (for
   example, 1962 Treasury yields are "known since 2005-06-28"). Strict point-in-time research
   therefore has no data for those series before their first vintage date (table below).
+- **Limitation: closures and confirmations do not record their run.** When a later run closes or
+  re-confirms a FRED version, only the time is stored. `marketpulse verify --replay` verifies
+  each version's creation against its run's stored pages, but reports versions that a later run
+  closed or re-confirmed as UNSUPPORTED ([verification.md](verification.md)).
 
 ### Tracked series and backfill results
 
@@ -240,6 +244,10 @@ EIA publishes **no vintages**, so Market Pulse records what it saw and when
   implemented (backlog).
 - HTTP error responses (e.g. 400/404 rejections) are not stored as raw payloads; the run's error
   message and any `eia_request_rejected` issue are the record (backlog).
+- **Verification replay** (`marketpulse verify --replay`) checks each EIA version's creation
+  against the page it cites, and each closure against the closing run's page. Confirmations by
+  later snapshots are not replayed, so those versions are reported as UNSUPPORTED, not VERIFIED
+  ([verification.md](verification.md)).
 
 ### Tracked series
 
