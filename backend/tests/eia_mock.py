@@ -55,6 +55,7 @@ def synthetic_page(
     frequency: str = "weekly",
     date_format: str = "YYYY-MM-DD",
     offset: int = 0,
+    length: int = 5000,
     warnings: list[dict[str, str]] | None = None,
     **response_extra: Any,
 ) -> bytes:
@@ -78,7 +79,7 @@ def synthetic_page(
                 "facets": {"series": ["SYNTH1"]},
                 "sort": [{"column": "period", "direction": "asc"}],
                 "offset": offset,
-                "length": 5000,
+                "length": length,
             },
         },
         "apiVersion": "2.1.14",

@@ -177,11 +177,23 @@ simulator of that behavior; **no EIA data has been ingested from the live API ye
   of 5, retries 429/5xx/transport errors, and never logs or stores the API key (URLs are
   redacted). Pages hold at most 5,000 rows.
 - **Completeness:** every page is requested at offset = rows received so far; the client stops
-  at EIA's reported total and then re-checks requested and echoed offsets, stable totals,
-  duplicate periods, ascending order, received == total, and metadata (frequency, date format,
-  series, description, units) against the catalog. EIA's "incomplete return" notice is expected
-  on every page that does not hold all remaining rows; any other warning fails the request. An
-  unknown series answers HTTP 200 with total 0, which fails as an empty response.
+  at EIA's reported total and then re-checks requested and echoed offsets and length, stable
+  totals, that each page holds exactly min(length, total - offset) rows, duplicate periods,
+  ascending order, received == total, and metadata (frequency, date format, series,
+  description, units) against the catalog. An unknown series answers HTTP 200 with total 0,
+  which fails as an empty response.
+- **The "incomplete return" warning is not truncation.** Observed live on 2026-11-05, EIA attaches
+  it whenever the requested `length` is below the reported `total`, including on a page that
+  holds every remaining row:
+  - the nine-series probe got it on the final row of every series (offset total - 1, length 1);
+  - three requests for `us_lng_exports` (356 rows) got no warning with length 5000 at offset 0
+    or 355, nor with length 356 at offset 0.
+
+  So it is tolerated exactly when length < total, and only on a page that also holds every row
+  its request should; any other warning, or the notice where length >= total, fails the request.
+  Real truncation is caught by the row counts and the total, never by the warning. This rule is
+  inferred from those observations on these routes; EIA does not document it, and it is not
+  guaranteed for every route.
 - **Periods:** daily and weekly periods are `YYYY-MM-DD` (weekly = the week's last day, a Friday
   for every tracked weekly series); monthly periods are `YYYY-MM`. Other frequencies are refused.
 
@@ -210,6 +222,10 @@ compared with `max_staleness_days`.
   series are flagged as licensed for personal use only.
 - **Stops early:** an invalid key (HTTP 401/403) or an exhausted rate limit (429 after retries)
   stops the probe; the remaining series are reported as not probed.
+- **One-row samples carry "incomplete return"** whenever a series has more than one row (length
+  1 < total), on the last row too. The probe accepts it there, after checking that each sample
+  holds exactly one row; the first live probe (2026-11-05) failed all nine series on this
+  before the rule was corrected.
 - **Exit codes:**
   - 0: every series ok;
   - 1: any series failed, or a configuration error such as a missing key or an unknown code;
@@ -274,6 +290,10 @@ EIA publishes **no vintages**, so Market Pulse records what it saw and when
   implemented (backlog).
 - HTTP error responses (e.g. 400/404 rejections) are not stored as raw payloads; the run's error
   message and any `eia_request_rejected` issue are the record (backlog).
+- **Series over 5,000 rows** are fetched in pages of 5,000; every page carries "incomplete
+  return" (length 5,000 < total), which is tolerated as above. Today only the three restricted
+  daily spot-price series are that long; the behavior is covered by simulator tests, not yet by
+  a live run.
 - **Verification replay** (`marketpulse verify --replay`) checks each EIA version's creation
   against the page it cites, and each closure against the closing run's page. Confirmations by
   later snapshots are not replayed, so those versions are reported as UNSUPPORTED, not VERIFIED

@@ -14,6 +14,19 @@ its SHA-256 in `manifest.json` is of the uncompressed body. A test verifies ever
 > that do not hold all rows carry the warning `incomplete return`, and over-limit requests add
 > `parameter out of range: length`; the **series-ID route** truncates with no warning at all.
 
+> **Correction (2026-11-05, D5.3).** The paging fixtures below both capture pages that do *not*
+> reach the total, and the code generalized from them that the notice appears only while rows
+> remain. Live checks showed otherwise, so `incomplete return` is **not** evidence of truncation:
+> - the nine-series probe (2026-11-05) got the notice on the **final** row of every series
+>   (offset total - 1, length 1, one row returned, totals 356 to 2,301);
+> - a three-request check of `us_lng_exports` (356 rows, 2026-11-05) got **no** notice for
+>   offset 0 / length 5000, offset 0 / length 356, or offset 355 / length 5000 (one row).
+>
+> The rule that fits every observation is: the notice appears when the requested `length` is
+> below the reported `total`. It is inferred from these routes and requests, not documented by
+> EIA, and not guaranteed for every route. Those live responses were not recorded as fixtures
+> (the probe keeps nothing); the simulator (`tests/eia_sim.py`) reproduces the rule.
+
 **No Refinitiv-sourced data is included.** WTI, Brent, and Henry Hub spot prices are Refinitiv
 (LSEG) data republished by EIA and classified `personal_use_only`; they are never recorded here,
 and a test fails if any fixture mentions them. Behavior observed only in those series (for

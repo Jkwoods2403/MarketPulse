@@ -6,8 +6,13 @@ Behaviors reproduced:
 - native routes "<route>/data": string values and total; ascending/descending sort; start/end
   filters on period strings; offset/length paging capped at 5,000 rows; echo of only the
   parameters sent (offset/length as strings); top-level `warnings` FIRST in the body:
-  "incomplete return" on any page that does not reach the total, plus
-  "parameter out of range: length" when length > 5,000 (texts copied from the fixture);
+  "incomplete return" whenever the effective length (the requested length capped at 5,000;
+  5,000 if none is sent) is below the total, on EVERY such page including the one holding the
+  last rows, plus
+  "parameter out of range: length" when length > 5,000 (texts copied from the fixture).
+  The notice rule is the one observed live (2026-11-05: the nine-series probe got it with
+  length 1 on the final row; us_lng_exports, 356 rows, did not with length 5000 at offset 0 or
+  355, nor with length 356); it is not documented by EIA;
 - unknown series facet on a native route: HTTP 200, total "0", no rows;
 - series-ID route "seriesid/<ID>": ignores sort/start/end (always newest first), JSON-number
   values and total, offset/length honored, NO warnings even when truncated; echo includes the
@@ -197,7 +202,7 @@ class FakeEia:
         warnings = []
         if requested_length > MAX_ROWS:
             warnings.append(LENGTH_WARNING)
-        if offset + len(page) < len(rows):
+        if length < len(rows):  # observed live (effective length < total), not "rows remain"
             warnings.append(INCOMPLETE_WARNING)
         body: dict[str, Any] = {}
         if warnings:

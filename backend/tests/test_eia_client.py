@@ -185,13 +185,54 @@ def test_full_fetch_pages_by_total_with_exact_offsets_and_values() -> None:
     assert h.fake.data_requests()[0].url.path == "/v2/petroleum/pri/spt/data"
 
 
-def test_pagination_notice_on_every_non_final_page_is_tolerated() -> None:
+def test_pagination_notice_on_every_page_including_the_final_one_is_tolerated() -> None:
+    """length 4 < total 10: EIA's notice on all three pages, the final one too (observed live)."""
     h = Harness()
     periods = h.add_storage(10)
     rows = h.client.fetch_series(STORAGE, page_size=4)  # pages of 4, 4, 2
     assert [r.period for r in rows] == periods
     warned = [[w["warning"] for w in json.loads(r.content).get("warnings", [])] for _, r in h.raw]
-    assert warned == [["incomplete return"], ["incomplete return"], []]
+    assert warned == [["incomplete return"]] * 3
+
+
+def test_a_full_single_page_has_no_notice() -> None:
+    """length 5000 >= total: no notice (observed live for us_lng_exports, requests A and C)."""
+    h = Harness()
+    periods = h.add_storage(10)
+    assert [r.period for r in h.client.fetch_series(STORAGE)] == periods
+    assert "warnings" not in json.loads(h.raw[0][1].content)
+
+
+def test_more_than_5000_rows_with_the_notice_on_the_final_page_is_complete() -> None:
+    """SYNTHETIC 6,200 weekly rows: two pages (5,000 and 1,200 rows), both with the notice."""
+    h = Harness()
+    periods = fridays(date(1900, 1, 5), 6200)
+    rows = make_rows(
+        STORAGE.facet_series,
+        STORAGE.description,
+        STORAGE.units,
+        [(p, str(i)) for i, p in enumerate(periods)],
+    )
+    h.fake.add(
+        "NG.NW2_EPG0_SWO_R48_BCF.W",
+        SimSeries(STORAGE.route, STORAGE.facet_series, "weekly", rows),
+        SimRoute([("weekly", "YYYY-MM-DD")]),
+    )
+    pages = h.client.fetch_series_pages(STORAGE)
+    assert [(p.offset, len(p.rows)) for p in pages] == [(0, 5000), (5000, 1200)]
+    assert [r.period for p in pages for r in p.rows] == periods
+    warned = [[w["warning"] for w in json.loads(r.content).get("warnings", [])] for _, r in h.raw]
+    assert warned == [["incomplete return"], ["incomplete return"]]
+
+
+def test_the_notice_on_a_page_whose_length_covers_the_total_fails() -> None:
+    h = Harness()
+    h.add_storage(10)
+    h.fake.faults.append(
+        fault_on_offset(0, lambda b: b.__setitem__("warnings", [INCOMPLETE_WARNING]))
+    )
+    with pytest.raises(EiaWarningError, match=r"'incomplete return' at offset 0 \(length 5000"):
+        h.client.fetch_series(STORAGE)
 
 
 def test_window_parameters_are_sent_and_respected() -> None:
@@ -270,11 +311,6 @@ def _rows_from_offset_zero(h: Harness) -> Callable[[dict[str, Any]], None]:
             lambda h: fault_on_offset(4, lambda b: b["response"].__setitem__("data", [])),
             EiaIncompleteError,
             "received 4 of 10",
-        ),
-        (
-            lambda h: fault_on_offset(8, lambda b: b.__setitem__("warnings", [INCOMPLETE_WARNING])),
-            EiaWarningError,
-            "'incomplete return' on the final page",
         ),
         (
             lambda h: fault_on_offset(
@@ -376,11 +412,13 @@ def test_truncation_without_warnings_is_still_caught() -> None:
         h.client.fetch_series(STORAGE, page_size=4)
 
 
-def test_a_short_page_followed_by_the_remaining_rows_is_complete() -> None:
-    """A smaller-than-requested page is not truncation if the remaining rows follow: the client
-    requests the next page at its own count and collects every row exactly once."""
+def test_a_short_page_is_incomplete_even_if_the_remaining_rows_follow() -> None:
+    """A page with fewer rows than its request should hold is incomplete. The client still asks
+    for the next page at its own count (so nothing is skipped), but the result is refused: the
+    short page carries EIA's notice (length 4 < total 10), and the notice is accepted only on a
+    page that holds every row its request should."""
     h = Harness()
-    periods = h.add_storage(10)
+    h.add_storage(10)
 
     def short(request: httpx.Request, body: dict[str, Any]) -> dict[str, Any]:
         if int(request.url.params["offset"]) == 4:
@@ -388,7 +426,8 @@ def test_a_short_page_followed_by_the_remaining_rows_is_complete() -> None:
         return body
 
     h.fake.faults.append(short)
-    assert [r.period for r in h.client.fetch_series(STORAGE, page_size=4)] == periods
+    with pytest.raises(EiaIncompleteError, match="page at offset 4 holds 2 rows, expected 4"):
+        h.client.fetch_series(STORAGE, page_size=4)
     assert [p["offset"] for p in h.data_params()] == ["0", "4", "6"]
 
 

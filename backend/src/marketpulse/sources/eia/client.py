@@ -9,9 +9,10 @@ Completeness never depends on warnings. For each request the client:
 - asks for pages of at most 5,000 rows, each at offset == rows received so far;
 - stops when the rows received reach EIA's reported total (with a hard page cap);
 - checks that EIA executed what was asked (echoed frequency, series facet, ascending sort);
-then validate.assemble_pages independently re-checks offsets (requested and echoed), stable
-totals, no duplicate periods, ascending order, the final count == total, metadata drift, and the
-warning rule (only "incomplete return" on a page that is not the last is tolerated).
+then validate.assemble_pages independently re-checks offsets and length (requested and
+echoed), stable totals, no duplicate periods, ascending order, the final count == total,
+metadata drift, and the warning rule ("incomplete return" is tolerated only where the requested
+length explains it).
 
 Every raw response is passed to the optional `on_response` hook *before* parsing (warnings
 included, since they are part of the body), so the ingestion layer can preserve it.
@@ -231,7 +232,7 @@ class EiaClient:
                         f"total {page.total}; pagination is not advancing"
                     ]
                 )
-        rows = assemble_pages(pages, expected, allow_empty=allow_empty)
+        rows = assemble_pages(pages, expected, page_size=page_size, allow_empty=allow_empty)
         fetched = [
             EiaFetchedPage(
                 offset=offset,
