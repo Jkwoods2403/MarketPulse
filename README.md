@@ -181,6 +181,13 @@ uv run pytest                     # MARKETPULSE_REQUIRE_DB=1 makes database test
 pnpm lint && pnpm typecheck && pnpm build
 ```
 
+Backend tests run isolated ([`backend/tests/isolation.py`](backend/tests/isolation.py)):
+- they never read provider API keys or the repository `data/` directory;
+- they can reach only loopback network addresses;
+- they connect only to a local PostgreSQL server (`localhost`, loopback, or Unix socket) on the
+  configured `POSTGRES_PORT`, and only to databases whose name ends in `_test`. Database tests use
+  `<POSTGRES_DB>_test`, which is created and dropped for each session.
+
 ## Roadmap
 
 | # | Milestone | Status |
