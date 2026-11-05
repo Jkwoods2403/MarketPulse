@@ -22,6 +22,7 @@ callers never present committed changes as rolled back.
 """
 
 import logging
+import os
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -52,13 +53,37 @@ class RunFinalizationError(RuntimeError):
     """The run's outcome could not be recorded; its row in ops.ingestion_runs stays `running`."""
 
 
+# Credentials the application reads from the environment. `git` never needs them, so they are
+# left out of its environment: every secret Settings reads (all `SecretStr` fields) plus libpq's
+# PGPASSWORD. Compared case-insensitively (pydantic-settings reads env names that way).
+SUBPROCESS_EXCLUDED_ENV = frozenset(
+    {"EIA_API_KEY", "FRED_API_KEY", "POSTGRES_PASSWORD", "PGPASSWORD"}
+)
+
+
+def subprocess_environment(source: Mapping[str, str] | None = None) -> dict[str, str]:
+    """A copy of `source` (default: this process's environment) without credentials, for child
+    processes. Neither `source` nor the process's own environment is modified.
+    """
+    return {
+        name: value
+        for name, value in (os.environ if source is None else source).items()
+        if name.upper() not in SUBPROCESS_EXCLUDED_ENV
+    }
+
+
 @lru_cache(maxsize=1)
 def code_version() -> str:
-    """Package version plus the git commit when available (e.g. '0.1.0+790a0e2')."""
+    """Package version plus the git commit when available (e.g. '0.1.0+790a0e2').
+
+    `git` runs with `subprocess_environment()`: everything it may need (PATH, HOME, ...) but no
+    credential, so a provider key in this process's environment never reaches it.
+    """
     try:
         sha = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],  # noqa: S607
             cwd=REPO_ROOT,
+            env=subprocess_environment(),
             capture_output=True,
             text=True,
             timeout=2,
