@@ -5,15 +5,26 @@ Each check raises a specific error with every problem listed; nothing is skipped
 - EiaMetadataError: the response's frequency, date format, series, description, or units differ
   from the verified catalog entry (drift), or the data is not in ascending period order.
 - EiaWarningError: EIA reported a warning. The only tolerated warning is EIA's pagination
-  notice ("incomplete return") on a page that is not the last one; observed live, EIA attaches it
-  to every native-route page that does not contain all remaining rows. Any other warning (e.g.
-  "parameter out of range: length"), the notice on the final page, or an unrecognized warning
-  is a failure.
-- EiaIncompleteError: rows received != total reported, pages are not contiguous, totals change
-  between pages, or a period appears twice. Completeness is always checked against `total`,
-  never inferred from warnings (the series-ID route truncates without any warning at all).
+  notice ("incomplete return"), and only where the request explains it (see
+  `pagination_notice_expected`). Any other warning (e.g. "parameter out of range: length"), the
+  notice where the request does not explain it, or an unrecognized warning is a failure.
+- EiaIncompleteError: rows received != total reported, a page holds other than
+  min(length, total - offset) rows, pages are not contiguous, the executed offset or length
+  differs from the request, totals change between pages, or a period appears twice.
+  Completeness is always checked against `total` and row counts, never inferred from warnings
+  (the series-ID route truncates without any warning at all).
 - EiaEmptyResponseError: a catalogued series returned no data (EIA answers HTTP 200 with total
   "0" for unknown series on native routes).
+
+The pagination notice is not evidence of truncation. Observed live (the 2026-11-01 fixtures; the
+nine-series probe and a three-request check of us_lng_exports on 2026-11-05), EIA attaches it
+whenever the requested `length` is smaller than the reported `total`, even on a page that holds
+every remaining row (offset total - 1, length 1, one row returned: notice present), and omits it
+when `length` is at least the total, whatever the offset (offset 0 or total - 1 with length
+5000, and offset 0 with length == total: no notice). This is the rule that fits every
+observation so far, on the routes observed; it is not documented by EIA or guaranteed for every
+route. Completeness never relies on it, and a notice the request does not explain is still a
+failure.
 """
 
 from collections import Counter
@@ -42,7 +53,7 @@ class EiaWarningError(EiaDataError):
     """EIA reported a warning that is not an expected pagination notice."""
 
 
-# EIA's notice on a page that does not hold all rows (observed live on 2026-11-01).
+# EIA's pagination notice (observed live; see the module docstring for when it appears).
 PAGINATION_NOTICE = "incomplete return"
 
 
@@ -108,14 +119,37 @@ def check_page_metadata(page: EiaDataPage, expected: EiaSeriesExpectation) -> li
     return problems
 
 
+def expected_page_rows(total: int, *, offset: int, length: int) -> int:
+    """How many rows a complete response to (offset, length) holds when `total` rows match."""
+    return max(0, min(length, total - offset))
+
+
+def pagination_notice_expected(total: int, *, length: int) -> bool:
+    """Whether the request explains EIA's "incomplete return" notice: the requested `length` is
+    below the reported total (when EIA attaches it, observed live).
+
+    This only decides that the notice is not an anomaly. A page carrying it is accepted only if
+    it also holds exactly `expected_page_rows` rows and passes every other check, so a short
+    (genuinely incomplete) page still fails, as incomplete. A request length below 1 is not a
+    request EIA could have answered, so it is refused rather than evaluated.
+    """
+    if length < 1:
+        raise ValueError(f"request length must be at least 1, got {length}")
+    return length < total
+
+
 def assemble_pages(
     pages: Sequence[tuple[int, EiaDataPage]],
     expected: EiaSeriesExpectation,
     *,
+    page_size: int,
     allow_empty: bool = False,
 ) -> list[EiaRow]:
-    """Validate the pages of one request (each with the offset it was requested at) and return
-    all rows in ascending period order. Raises instead of returning partial data."""
+    """Validate the pages of one request (each with the offset it was requested at, all with
+    the requested `page_size` as their length) and return all rows in ascending period order.
+    Raises instead of returning partial data."""
+    if not 1 <= page_size <= MAX_ROWS_PER_REQUEST:
+        raise ValueError(f"page_size must be between 1 and {MAX_ROWS_PER_REQUEST}")
     if not pages:
         raise EiaIncompleteError([f"{expected.code}: no pages received"])
 
@@ -125,13 +159,14 @@ def assemble_pages(
 
     warning_problems: list[str] = []
     for requested_offset, page in pages:
-        more_rows_remain = requested_offset + len(page.rows) < page.total
+        explained = pagination_notice_expected(page.total, length=page_size)
         for w in page.warnings:
-            if w.warning == PAGINATION_NOTICE and more_rows_remain:
-                continue  # expected on every non-final page; completeness is checked below
-            where = "the final page" if not more_rows_remain else f"offset {requested_offset}"
+            if w.warning == PAGINATION_NOTICE and explained:
+                continue  # length < total; each page's row count is checked below
+            where = f"offset {requested_offset} (length {page_size}, total {page.total}, "
+            where += f"{len(page.rows)} rows)"
             warning_problems.append(
-                f"{expected.code}: EIA warning {w.warning!r} on {where}"
+                f"{expected.code}: EIA warning {w.warning!r} at {where}"
                 + (f": {w.description}" if w.description else "")
             )
     if warning_problems:
@@ -153,10 +188,21 @@ def assemble_pages(
             problems.append(
                 f"{expected.code}: EIA executed offset {echoed}, requested {requested_offset}"
             )
+        echoed_length = page.echo.get("length")
+        if echoed_length is not None and str(echoed_length) != str(page_size):
+            problems.append(
+                f"{expected.code}: EIA executed length {echoed_length}, requested {page_size}"
+            )
         if len(page.rows) > MAX_ROWS_PER_REQUEST:
             problems.append(
                 f"{expected.code}: page has {len(page.rows)} rows, above the "
                 f"{MAX_ROWS_PER_REQUEST}-row limit"
+            )
+        want = expected_page_rows(page.total, offset=requested_offset, length=page_size)
+        if len(page.rows) != want:  # a short (or overfull) page is incomplete, notice or not
+            problems.append(
+                f"{expected.code}: page at offset {requested_offset} holds {len(page.rows)} "
+                f"rows, expected {want} (length {page_size}, total {page.total})"
             )
         received += len(page.rows)
 

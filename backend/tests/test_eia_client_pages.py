@@ -47,9 +47,12 @@ def test_windowed_pages_carry_the_window_in_their_urls() -> None:
     assert f"start={periods[5]}" in page.url
 
 
-def test_short_page_is_followed_by_the_next_offset_not_mistaken_for_the_end() -> None:
+def test_short_page_is_followed_by_the_next_offset_but_refused_as_incomplete() -> None:
+    """The client is not fooled into stopping early (it asks for the missing row at offset 9),
+    but a page holding fewer rows than its request should is incomplete, so nothing is
+    returned."""
     h = Harness()
-    periods = h.add_storage(10)
+    h.add_storage(10)
 
     def short_final_page(request: httpx.Request, body: dict[str, Any]) -> dict[str, Any] | None:
         if request.url.params.get("offset") == "8":
@@ -58,9 +61,9 @@ def test_short_page_is_followed_by_the_next_offset_not_mistaken_for_the_end() ->
         return None
 
     h.fake.faults.append(short_final_page)
-    pages = h.client.fetch_series_pages(STORAGE, page_size=4)
-    assert [p.offset for p in pages] == [0, 4, 8, 9]  # the missing row is requested again
-    assert [r.period for p in pages for r in p.rows] == periods
+    with pytest.raises(EiaIncompleteError, match="page at offset 8 holds 1 rows, expected 2"):
+        h.client.fetch_series_pages(STORAGE, page_size=4)
+    assert [r.url.params["offset"] for r in h.fake.data_requests()] == ["0", "4", "8", "9"]
 
 
 def test_truncated_pagination_raises_and_keeps_the_raw_pages() -> None:

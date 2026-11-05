@@ -389,18 +389,71 @@ def test_a_series_with_no_data_fails() -> None:
     assert sim.requests_by_kind()["data"] == 1
 
 
+def notices(sim: Sim) -> list[list[str]]:
+    return [
+        [w["warning"] for w in json.loads(r.content).get("warnings", [])]
+        for dataset, r in sim.responses
+        if dataset == "data"
+    ]
+
+
+def test_the_notice_on_both_one_row_samples_is_expected() -> None:
+    """The live failure of 2026-11-05: length 1 < total, so EIA sends "incomplete return" with
+    the first AND the last row. Both pages are complete, so the series is ok."""
+    sim = Sim()
+    s = series(sim.probe(STORAGE), STORAGE)
+    assert notices(sim) == [["incomplete return"], ["incomplete return"]]
+    assert s.status == OK and s.problems == []
+
+
+def test_a_single_row_series_gets_no_notice_and_an_unexplained_one_fails() -> None:
+    sim = Sim()
+    sim.add(LNG, periods_until("monthly", TODAY, 1))
+    assert series(sim.probe(LNG), LNG).status == OK
+    assert notices(sim) == [[]]  # length 1 == total 1: no notice
+
+    sim = Sim()
+    sim.add(LNG, periods_until("monthly", TODAY, 1))
+
+    def notice(request: httpx.Request, body: dict[str, Any]) -> None:
+        body["warnings"] = [{"warning": "incomplete return", "description": "synthetic"}]
+
+    sim.fake.faults.append(on_data(LNG, notice))
+    s = series(sim.probe(LNG), LNG)
+    assert s.problems == ["us_lng_exports: EIA warning 'incomplete return' at offset 0: synthetic"]
+
+
+@pytest.mark.parametrize(("offset", "rows"), [("0", 2), ("29", 0), ("29", 2)])
+def test_a_sample_with_the_wrong_number_of_rows_fails(offset: str, rows: int) -> None:
+    sim = Sim()
+    series_rows = sim.fake.series[EXP[STORAGE].facet_series].rows
+
+    def resize(request: httpx.Request, body: dict[str, Any]) -> None:
+        if request.url.params["offset"] == offset:
+            start = int(offset) - (1 if rows > 1 and offset != "0" else 0)
+            body["response"]["data"] = series_rows[start : start + rows]
+
+    sim.fake.faults.append(on_data(STORAGE, resize))
+    s = series(sim.probe(STORAGE), STORAGE)
+    assert s.status == FAIL
+    assert any(f"{rows} row(s) at offset {offset}, expected 1" in p for p in s.problems)
+
+
 def test_an_unexpected_warning_fails_but_the_pagination_notice_does_not() -> None:
     sim = Sim()
 
     def warn(request: httpx.Request, body: dict[str, Any]) -> None:
-        if request.url.params["offset"] != "0":  # the final page: no warning is acceptable
-            body["warnings"] = [{"warning": "something new", "description": "unexpected"}]
+        if request.url.params["offset"] != "0":  # added to the final page's own notice
+            body["warnings"] = [
+                *body.get("warnings", []),
+                {"warning": "something new", "description": "unexpected"},
+            ]
 
     sim.fake.faults.append(on_data(STORAGE, warn))
     s = series(sim.probe(STORAGE), STORAGE)
     assert [p for p in s.problems if "warning" in p] == [
         "l48_gas_storage: EIA warning 'something new' at offset 29: unexpected"
-    ]  # the first page's "incomplete return" notice was tolerated
+    ]  # both pages' "incomplete return" notices were tolerated
 
 
 def test_a_total_that_changes_between_requests_fails() -> None:

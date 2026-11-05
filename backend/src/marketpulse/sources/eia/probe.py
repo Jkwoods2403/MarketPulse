@@ -21,7 +21,12 @@ Per series, at most four requests (route metadata is fetched once per route):
    series facet, and frequency (`EiaClient.verify_route`);
 3. the first row (ascending, offset 0, length 1): the total row count, the first period, and
    the catalogued frequency, date format, series, description, and units (drift);
-4. the last row (offset total - 1): the last period, checked the same way.
+4. the last row (offset total - 1, length 1): the last period, checked the same way.
+
+Each sampled page must hold exactly one row. EIA's "incomplete return" notice is expected on
+these one-row requests whenever the series has more than one row (EIA attaches it when the
+requested length is below the total; see validate.pagination_notice_expected), so it is accepted
+there and nowhere else; any other warning fails the series.
 
 Results per series: `fail` (anything that would stop ingestion: drift, a changed route, no
 data, EIA errors, unexpected warnings, malformed responses or periods), `warn` (the latest
@@ -50,10 +55,13 @@ from marketpulse.sources.eia.validate import (
     EiaSeriesExpectation,
     check_page_metadata,
     expectation_for,
+    expected_page_rows,
+    pagination_notice_expected,
 )
 from marketpulse.sources.http import ProviderHTTPError
 
 SOURCE_CODE = "eia"
+SAMPLE_LENGTH = 1  # rows requested for the first and last row
 RESTRICTED_LICENSES = frozenset({License.PERSONAL_USE_ONLY, License.NO_REDISTRIBUTION})
 
 OK, WARN, FAIL = "ok", "warn", "fail"
@@ -212,7 +220,7 @@ def _probe_series(
 
     # 3. and 4. The first and last rows: total, coverage, and metadata drift.
     try:
-        first = client.fetch_page(expected, offset=0, length=1)
+        first = client.fetch_page(expected, offset=0, length=SAMPLE_LENGTH)
     except Exception as exc:
         failed("first row", exc)
         return
@@ -226,7 +234,7 @@ def _probe_series(
     last = first
     if first.total > 1:
         try:
-            last = client.fetch_page(expected, offset=first.total - 1, length=1)
+            last = client.fetch_page(expected, offset=first.total - 1, length=SAMPLE_LENGTH)
         except Exception as exc:
             failed("last row", exc)
             return
@@ -283,12 +291,18 @@ def _route_problems(metadata: EiaRouteMetadata, expected: EiaSeriesExpectation) 
 
 
 def _page_problems(page: EiaDataPage, expected: EiaSeriesExpectation, *, offset: int) -> list[str]:
-    """Drift and warnings in one sampled page (completeness is not the probe's concern)."""
+    """Drift, row count, and warnings in one sampled page (SAMPLE_LENGTH rows at `offset`)."""
     problems = check_page_metadata(page, expected)
-    more_rows_remain = offset + len(page.rows) < page.total
+    want = expected_page_rows(page.total, offset=offset, length=SAMPLE_LENGTH)
+    if len(page.rows) != want:
+        problems.append(
+            f"{expected.code}: {len(page.rows)} row(s) at offset {offset}, expected {want} "
+            f"(length {SAMPLE_LENGTH}, total {page.total})"
+        )
+    explained = pagination_notice_expected(page.total, length=SAMPLE_LENGTH)
     for w in page.warnings:
-        if w.warning == PAGINATION_NOTICE and more_rows_remain:
-            continue  # EIA's notice on any page that does not reach the total
+        if w.warning == PAGINATION_NOTICE and explained:
+            continue  # length 1 below the total: EIA's notice, not truncation
         problems.append(
             withhold_values(
                 f"{expected.code}: EIA warning {w.warning!r} at offset {offset}"
