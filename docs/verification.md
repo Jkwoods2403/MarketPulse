@@ -113,6 +113,20 @@ The CLI prints one row per check with these columns:
 Below the table it prints up to five sample findings per check as "N of M finding(s) shown".
 One finding can cover several versions, for example every version citing a missing page.
 
+With `--replay`, the table adds two rows after the SQL checks, one per source:
+
+| Row | Covers |
+|---|---|
+| `replay_eia` | EIA versions in scope: creation against the cited page, and closure against the closing run's page |
+| `replay_fred` | FRED versions in scope: each run's output rebuilt from that run's stored pages |
+
+In these rows, the `errors`, `unverified`, `unsupported`, and `verified` columns count
+**versions**, and each version is counted in exactly one of them (see
+[Replay states](#replay-states)). `warnings` is always 0. The row's `status` is `FAIL` if any
+version is in ERROR, else `UNVERIFIED`, else `UNSUPPORTED`, else `ok`. Sample findings are
+prefixed `error:`, `unverified:`, or `unsupported:` and listed in that order. The rows'
+version counts add up to the `replay (versions)` line below.
+
 The summary line shows totals. With `--replay` it adds:
 
 ```
