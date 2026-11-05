@@ -8,6 +8,7 @@ from marketpulse import __version__
 
 if TYPE_CHECKING:
     from marketpulse.ingestion.verify import VerifyReport
+    from marketpulse.sources.eia.probe import EiaProbeReport
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -110,7 +111,63 @@ def _build_parser() -> argparse.ArgumentParser:
         "hash-verified) and compare them with the versions they produced",
     )
 
+    probe = sub.add_parser("probe", help="Read-only live checks of a provider (stores nothing)")
+    probe_sub = probe.add_subparsers(dest="probe_command", required=True)
+    probe_eia = probe_sub.add_parser(
+        "eia",
+        help="Check the catalogued EIA series against the live API (read-only)",
+        description="For each catalogued EIA series, check against the live API that the "
+        "route still offers its frequency and date format, that the series-ID route maps to "
+        "the catalogued route and facet, and that the first and last rows match the catalogued "
+        "metadata; report the row count, first and last periods, and staleness. Stores "
+        "nothing: no database access, no ingestion runs, no raw responses kept. Never shows "
+        "data values. Up to 4 requests per series (route metadata once per route). "
+        "Exit codes: 0 every series ok; 1 any series failed (or a configuration error); "
+        "2 warnings only (a series is older than its max_staleness_days).",
+    )
+    probe_eia.add_argument(
+        "--series",
+        nargs="+",
+        metavar="CODE",
+        help="Catalog series codes to probe (e.g. l48_gas_storage); default: all EIA series",
+    )
+
     return parser
+
+
+def _print_eia_probe_report(report: "EiaProbeReport") -> None:
+    header = (
+        f"{'series':<24} {'license':<18} {'status':<6} {'rows':>7} {'first':<10} {'last':<10} "
+        f"{'age':>5} {'max':>4}"
+    )
+    print(header)
+    print("-" * len(header))
+    for s in report.series:
+        rows = "-" if s.total is None else f"{s.total:,}"
+        age = "-" if s.age_days is None else f"{s.age_days}d"
+        print(
+            f"{s.code:<24} {s.license:<18} {s.status:<6} {rows:>7} {s.first_period or '-':<10} "
+            f"{s.last_period or '-':<10} {age:>5} {s.max_staleness_days:>4}"
+        )
+    for s in report.series:
+        for label, messages in (("FAIL", s.problems), ("WARN", s.warnings)):
+            for message in messages:
+                text = message.removeprefix(f"{s.code}: ").replace("\n", "\n      ")
+                print(f"  {label} {s.code}: {text}")
+    restricted = [s.code for s in report.series if s.restricted]
+    print(
+        f"\nprobe eia ({report.probed_on.isoformat()}): {len(report.series)} series, "
+        f"{report.count('ok')} ok, {report.count('warn')} warn, {report.count('fail')} fail; "
+        f"{report.responses} responses received and discarded"
+    )
+    if restricted:
+        print(
+            f"restricted (licensed for personal use only; values never shown or stored by the "
+            f"probe): {', '.join(restricted)}"
+        )
+    print(
+        "read-only: no database access, no ingestion runs, no raw responses kept, no values shown"
+    )
 
 
 def _print_verify_report(report: "VerifyReport", data_dir: Path | None) -> None:
@@ -191,6 +248,35 @@ def _verify_command(series: list[str] | None, *, replay: bool = False) -> int:
         engine.dispose()
 
     _print_verify_report(report, raw_store.data_dir if raw_store else None)
+    return report.exit_code
+
+
+def _probe_eia_command(series: list[str] | None) -> int:
+    from marketpulse.core.config import get_settings
+    from marketpulse.sources.catalog import CatalogError, load_catalog
+    from marketpulse.sources.eia.client import EiaClient, EiaConfigError
+    from marketpulse.sources.eia.probe import EiaProbeConfigError, probe_eia
+    from marketpulse.sources.http import FetchResult
+
+    settings = get_settings()
+    key = settings.eia_api_key
+    if key is None or not key.get_secret_value().strip():
+        print("error: EIA_API_KEY is not set or is blank (set it in .env)")
+        return 1
+    received = 0
+
+    def discard(dataset: str, result: FetchResult) -> None:
+        nonlocal received
+        received += 1  # counted, then dropped: nothing is kept
+
+    try:
+        catalog = load_catalog()
+        with EiaClient.from_settings(settings, on_response=discard) as client:
+            report = probe_eia(client, catalog, series_codes=series, responses=lambda: received)
+    except (EiaProbeConfigError, EiaConfigError, CatalogError) as exc:
+        print(f"error: {exc}")
+        return 1
+    _print_eia_probe_report(report)
     return report.exit_code
 
 
@@ -381,6 +467,8 @@ def main(argv: list[str] | None = None) -> int:
         return _catalog_command(args.catalog_command, dry_run=getattr(args, "dry_run", False))
     elif args.command == "verify":
         return _verify_command(args.series, replay=args.replay)
+    elif args.command == "probe" and args.probe_command == "eia":
+        return _probe_eia_command(args.series)
     elif args.command == "ingest" and args.ingest_command == "fred":
         return _ingest_fred_command(args.series, full=args.full)
     elif args.command == "ingest" and args.ingest_command == "eia":

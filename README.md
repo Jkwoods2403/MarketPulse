@@ -108,6 +108,7 @@ EIA needs a free API key (<https://www.eia.gov/opendata/register.php>), added to
 `EIA_API_KEY=...`. Then, from `backend/`:
 
 ```bash
+uv run marketpulse probe eia                               # read-only live check; stores nothing
 uv run marketpulse ingest eia                              # all 12 EIA series
 uv run marketpulse ingest eia --series l48_gas_storage     # selected series (catalog codes)
 uv run marketpulse ingest eia --series wti_spot --full     # full-history snapshot
