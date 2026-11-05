@@ -16,10 +16,12 @@ import psycopg
 import pytest
 from sqlalchemy import create_engine
 
+import isolation
 from isolation import (
     APPROVED_DB_HOSTS,
     CREDENTIAL_VARS,
     LIBPQ_DEFAULT_PORT,
+    LIBPQ_ENV_VARS,
     REPO_DATA_DIR,
     IsolationError,
     approved_db_port,
@@ -162,7 +164,8 @@ def test_a_test_database_name_does_not_make_a_remote_host_acceptable(host: str) 
 
 def test_maintenance_connection_does_not_bypass_the_host_check() -> None:
     with maintenance_connection():
-        check_connection_target({"host": "localhost", "dbname": "postgres"})  # name relaxed
+        # name relaxed (the port is the approved one, so only the name rule is being exercised)
+        check_connection_target({"host": "localhost", "port": PORT, "dbname": "postgres"})
         with pytest.raises(IsolationError, match="refused host"):
             psycopg.connect(host="192.0.2.10", port=9, dbname="postgres", connect_timeout=1)
         with pytest.raises(IsolationError, match="refused host"):
@@ -209,24 +212,43 @@ def test_sqlalchemy_refuses_a_remote_host() -> None:
         engine.dispose()
 
 
-@pytest.mark.parametrize(
-    "params",
-    [
-        {"host": "localhost", "dbname": "marketpulse_test"},
-        {"host": "127.0.0.1", "port": PORT, "dbname": "marketpulse_test"},
-        {"host": "::1", "dbname": "marketpulse_test"},
-        {"host": "localhost", "hostaddr": "127.0.0.1", "dbname": "marketpulse_test"},
-        {"host": "localhost,127.0.0.1", "dbname": "marketpulse_test"},
-        {"host": "/var/run/postgresql", "dbname": "marketpulse_test"},
-        {"dbname": "marketpulse_test"},  # libpq default: local socket or localhost
-    ],
-)
+# Local configurations, WITHOUT a port. Each is checked below once with the approved port and
+# once with no port (libpq then uses its default, 5432), so these tests hold whatever port the
+# session is configured for (5432 normally, 5433 for staging).
+LOCAL_CONFIGS = [
+    {"host": "localhost", "dbname": "marketpulse_test"},
+    {"host": "127.0.0.1", "dbname": "marketpulse_test"},
+    {"host": "::1", "dbname": "marketpulse_test"},
+    {"host": "localhost", "hostaddr": "127.0.0.1", "dbname": "marketpulse_test"},
+    {"host": "localhost,127.0.0.1", "dbname": "marketpulse_test"},
+    {"host": "/var/run/postgresql", "dbname": "marketpulse_test"},
+    {"dbname": "marketpulse_test"},  # libpq default host: local socket or localhost
+]
+LOCAL_IDS = ["localhost", "ipv4", "ipv6", "hostaddr", "host-list", "socket", "no-host"]
+
+
+@pytest.mark.parametrize("params", LOCAL_CONFIGS, ids=LOCAL_IDS)
 def test_local_test_database_configurations_are_accepted(params: dict[str, str]) -> None:
-    check_connection_target(params)
+    check_connection_target({**params, "port": PORT})
+
+
+@pytest.mark.parametrize("params", LOCAL_CONFIGS, ids=LOCAL_IDS)
+def test_a_local_configuration_without_a_port_uses_the_libpq_default(
+    params: dict[str, str],
+) -> None:
+    """No port means libpq's default (5432): accepted only if that is the approved port.
+    With any other approved port (e.g. staging's 5433) it is refused, never silently allowed."""
+    if approved_db_port() == LIBPQ_DEFAULT_PORT:
+        check_connection_target(params)
+    else:
+        with pytest.raises(IsolationError, match="refused port"):
+            check_connection_target(params)
 
 
 def test_approved_port_is_the_configured_postgres_port() -> None:
-    assert approved_db_port() == int(os.environ["POSTGRES_PORT"]) == get_settings().postgres_port
+    # POSTGRES_PORT may be unset (no .env, nothing exported): the Settings default applies then.
+    configured = os.environ.get("POSTGRES_PORT") or Settings.model_fields["postgres_port"].default
+    assert approved_db_port() == int(configured) == get_settings().postgres_port
     check_database_port(get_settings().postgres_port)  # what the database fixture checks
 
 
@@ -299,6 +321,125 @@ def test_maintenance_connection_does_not_bypass_the_port_check() -> None:
         check_connection_target({"host": "localhost", "port": PORT, "dbname": "postgres"})
         with pytest.raises(IsolationError, match="refused port"):
             psycopg.connect(host="localhost", port=OTHER_PORT, dbname="postgres")
+
+
+# --- the guard under a default and non-default approved port -------------------------------------
+# Regression for the staging run (POSTGRES_PORT=5433): the rules must hold for ANY approved port.
+# The approved port is swapped only for the duration of one test (monkeypatch restores it); no test
+# here connects anywhere: every check either passes or refuses before connecting.
+
+APPROVED_PORTS = [5432, 5433, 6543]  # libpq's default, staging, an arbitrary other port
+
+
+@pytest.fixture(params=APPROVED_PORTS, ids=[f"approved-{p}" for p in APPROVED_PORTS])
+def approved(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> int:
+    port = int(request.param)
+    monkeypatch.setattr(isolation, "_approved_db_port", port)
+    assert approved_db_port() == port
+    return port
+
+
+def test_the_approved_port_is_accepted_and_any_other_refused(approved: int) -> None:
+    check_connection_target({"host": "127.0.0.1", "port": str(approved), "dbname": "x_test"})
+    for other in {approved - 1, approved + 1, LIBPQ_DEFAULT_PORT} - {approved}:
+        with pytest.raises(IsolationError, match="refused port"):
+            check_connection_target({"host": "127.0.0.1", "port": str(other), "dbname": "x_test"})
+
+
+@pytest.mark.parametrize("port", [None, ""], ids=["absent", "empty"])
+def test_an_omitted_port_is_the_libpq_default_for_every_approved_port(
+    approved: int, port: str | None
+) -> None:
+    params = {"host": "localhost", "dbname": "x_test"}
+    if port is not None:
+        params["port"] = port
+    if approved == LIBPQ_DEFAULT_PORT:
+        check_connection_target(params)
+    else:  # never silently "upgraded" to the approved port
+        with pytest.raises(IsolationError, match="refused port"):
+            check_connection_target(params)
+
+
+def test_the_pgport_fallback_under_every_approved_port(
+    approved: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PGPORT", str(approved))
+    check_connection_target({"host": "localhost", "dbname": "x_test"})
+    monkeypatch.setenv("PGPORT", str(approved + 1))
+    with pytest.raises(IsolationError, match="refused port"):
+        check_connection_target({"host": "localhost", "dbname": "x_test"})
+
+
+def test_maintenance_connection_under_every_approved_port(approved: int) -> None:
+    with maintenance_connection():
+        check_connection_target({"host": "localhost", "port": str(approved), "dbname": "postgres"})
+        with pytest.raises(IsolationError, match="refused port"):
+            check_connection_target(
+                {"host": "localhost", "port": str(approved + 1), "dbname": "postgres"}
+            )
+        with pytest.raises(IsolationError, match="refused host"):
+            check_connection_target(
+                {"host": "192.0.2.10", "port": str(approved), "dbname": "postgres"}
+            )
+    with pytest.raises(IsolationError, match="_test"):  # outside the context: name rule again
+        check_connection_target({"host": "localhost", "port": str(approved), "dbname": "postgres"})
+
+
+def test_names_and_hosts_are_refused_under_every_approved_port(approved: int) -> None:
+    port = str(approved)
+    with pytest.raises(IsolationError, match="'marketpulse'"):
+        check_connection_target({"host": "localhost", "port": port, "dbname": "marketpulse"})
+    with pytest.raises(IsolationError, match="refused host"):
+        check_connection_target({"host": "db.example.invalid", "port": port, "dbname": "x_test"})
+
+
+def test_inherited_libpq_defaults_are_removed_for_the_session() -> None:
+    assert not [var for var in LIBPQ_ENV_VARS if var in os.environ]
+
+
+# Set in the child session's environment, so the child does not start a child of its own.
+CHILD_SESSION_VAR = "MARKETPULSE_TEST_CHILD_SESSION"
+
+
+def test_the_config_and_isolation_tests_pass_under_a_non_default_port() -> None:
+    """End to end: a separate pytest session whose POSTGRES_PORT is 6543 (neither 5432 nor
+    staging's 5433), started with libpq defaults inherited from the shell (which the session
+    must remove), runs test_config.py and this file. No database test runs and nothing
+    connects: every check here passes or refuses before connecting."""
+    if os.environ.get(CHILD_SESSION_VAR) == "1":
+        pytest.skip("inside the child session: it must not start another one")
+    backend = Path(__file__).resolve().parents[1]
+    env = {
+        **os.environ,
+        CHILD_SESSION_VAR: "1",
+        "POSTGRES_PORT": "6543",
+        "PGPORT": "5432",  # inherited libpq defaults: removed by the child session's isolation
+        "PGHOST": "192.0.2.10",
+        "PGPASSWORD": "inherited-not-used",
+    }
+    result = subprocess.run(  # fixed argv: this interpreter running pytest
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "tests/test_config.py",
+            "tests/test_isolation.py",
+            "-k",
+            "not end_of_session",  # those three start sessions of their own; not needed here
+        ],
+        cwd=backend,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    assert result.returncode == pytest.ExitCode.OK, result.stdout[-3000:] + result.stderr[-2000:]
+    assert " passed" in result.stdout and "failed" not in result.stdout
+    assert "1 skipped" in result.stdout  # this test, inside the child: no further child
 
 
 # --- network guard -----------------------------------------------------------------------------

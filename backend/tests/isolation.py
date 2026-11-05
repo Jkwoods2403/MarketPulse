@@ -6,7 +6,10 @@ data directory. Each guard below closes one path:
 - **Configuration.** `Settings` normally reads the repository `.env`, which holds real API keys,
   the real data directory, and the real database name. During tests the `.env` file is not read
   at all. Only the PostgreSQL connection settings (user, password, host, port, database) are
-  copied from it, so database tests can still reach the local server.
+  copied from it, so database tests can still reach the local server. Inherited libpq defaults
+  (`PGHOST`, `PGPORT`, `PGPASSWORD`, `PGSERVICE`, ...) are removed, so nothing but those settings
+  decides where a test connects. Tests that check `Settings` defaults clear the `POSTGRES_*`
+  variables themselves: the session deliberately exports them for the database tests.
 - **Credentials.** Provider credentials (`EIA_API_KEY`, `FRED_API_KEY`, `ERCOT_*`) are removed
   from the process environment. Tests that need a key pass a synthetic one explicitly.
 - **Database.** `POSTGRES_DB` becomes `<name>_test`. Every psycopg connection (direct, or through
@@ -68,6 +71,35 @@ CREDENTIAL_VARS = (
     "ERCOT_API_PASSWORD",
     "ERCOT_API_SUBSCRIPTION_KEY",
 )
+# libpq's environment defaults, also removed for the session: inherited from the shell, they would
+# silently fill in any connection parameter a test leaves out (host, port, password, service,
+# ...). Tests connect only through the explicit POSTGRES_* settings above.
+LIBPQ_ENV_VARS = (
+    "PGHOST",
+    "PGHOSTADDR",
+    "PGPORT",
+    "PGDATABASE",
+    "PGUSER",
+    "PGPASSWORD",
+    "PGPASSFILE",
+    "PGSERVICE",
+    "PGSERVICEFILE",
+    "PGOPTIONS",
+    "PGAPPNAME",
+    "PGSSLMODE",
+    "PGREQUIRESSL",
+    "PGSSLCERT",
+    "PGSSLKEY",
+    "PGSSLROOTCERT",
+    "PGSSLCRL",
+    "PGCONNECT_TIMEOUT",
+    "PGTARGETSESSIONATTRS",
+    "PGLOADBALANCEHOSTS",
+    "PGCHANNELBINDING",
+    "PGGSSENCMODE",
+    "PGREQUIREAUTH",
+    "PGSYSCONFDIR",
+)
 
 
 class IsolationError(RuntimeError):
@@ -110,7 +142,7 @@ def _isolate_environment(data_dir: Path) -> None:
     _approve_db_port(
         os.environ.get("POSTGRES_PORT") or str(Settings.model_fields["postgres_port"].default)
     )
-    for var in CREDENTIAL_VARS:
+    for var in CREDENTIAL_VARS + LIBPQ_ENV_VARS:
         os.environ.pop(var, None)
     os.environ["MARKETPULSE_DATA_DIR"] = str(data_dir)
     # From here on, no Settings instance reads the repository `.env`.
