@@ -16,7 +16,7 @@ from typing import Any
 import httpx
 import pytest
 from pydantic import SecretStr
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -32,21 +32,26 @@ from marketpulse.db.models import (
     Observation,
     RawPayload,
     Series,
+    Source,
 )
 from marketpulse.ingestion.catalog_sync import sync_catalog
 from marketpulse.ingestion.eia import (
     UNFINALIZED,
     EiaIngestionConfigError,
     EiaIngestionSummary,
+    EiaLicenseError,
+    EiaRawRecorder,
     ingest_eia,
 )
 from marketpulse.ingestion.raw_store import RawPayloadStore, StoredPayload
 from marketpulse.ingestion.runs import IngestionRunTracker
-from marketpulse.sources.catalog import load_catalog
+from marketpulse.sources.catalog import Catalog, load_catalog
+from marketpulse.sources.catalog.schema import License
 from marketpulse.sources.eia.client import EiaClient, EiaConfigError, ResponseHook
 from marketpulse.sources.eia.validate import EiaSeriesExpectation, expectation_for
 from marketpulse.sources.http import RetryPolicy
 from test_eia_client import KEY, SPECS, UnlimitedLimiter, business_days, fridays
+from test_eia_license_guard import RESTRICTED, with_series_license
 
 CATALOG = load_catalog()
 EXP = {code: expectation_for(spec) for code, spec in SPECS.items()}
@@ -78,13 +83,16 @@ class Env:
     data_dir: Path
     client_factory: Callable[[ResponseHook], EiaClient]
 
-    def run(self, *codes: str, full: bool = False, page_size: int = 4) -> EiaIngestionSummary:
+    def run(
+        self, *codes: str, full: bool = False, page_size: int = 4, catalog: Catalog | None = None
+    ) -> EiaIngestionSummary:
         return ingest_eia(
             settings=self.settings,
             session_factory=self.factory,
             series_codes=list(codes) or None,
             full=full,
             client_factory=self.client_factory,
+            catalog=catalog,
             page_size=page_size,
         )
 
@@ -452,14 +460,19 @@ def test_series_on_the_shared_route_are_isolated(env: Env) -> None:
     ]
 
 
-def test_monthly_and_daily_series_including_personal_use_only(env: Env) -> None:
+def test_monthly_and_daily_series(env: Env) -> None:
+    # The catalog's only daily EIA series are the personal_use_only spot prices, which the real
+    # catalog refuses (see the licensing tests below). To keep the daily path covered, this test
+    # ingests SYNTHETIC values through a test-only catalog copy in which wti_spot has no
+    # override. The stored classification (ref.series, synced from the real catalog) is unchanged.
+    daily_ok = with_series_license(CATALOG, "wti_spot", None)
     months = [f"{2023 + (m // 12)}-{m % 12 + 1:02d}" for m in range(30)]
     add_series(env.fake, "us_lng_exports", [(m, str(300 + i)) for i, m in enumerate(months)])
     days = business_days(date(2026, 3, 2), 120)
     add_series(
         env.fake, "wti_spot", [(d, f"{60 + i % 7}.{i % 100:02d}") for i, d in enumerate(days)]
     )
-    summary = env.run("us_lng_exports", "wti_spot", page_size=50)
+    summary = env.run("us_lng_exports", "wti_spot", page_size=50, catalog=daily_ok)
     assert [(o.code, o.mode, o.status) for o in summary.outcomes] == [
         ("us_lng_exports", "full", "succeeded"),
         ("wti_spot", "full", "succeeded"),
@@ -467,13 +480,107 @@ def test_monthly_and_daily_series_including_personal_use_only(env: Env) -> None:
     feb = next(o for o in env.observations("us_lng_exports") if o.source_period == "2024-02")
     assert (feb.period_start, feb.period_end) == (date(2024, 2, 1), date(2024, 2, 29))
 
-    summary = env.run("us_lng_exports", "wti_spot", page_size=50)
+    summary = env.run("us_lng_exports", "wti_spot", page_size=50, catalog=daily_ok)
     lng, wti = summary.outcomes
     assert (lng.mode, lng.status, lng.fetched) == ("incremental", "succeeded", 27)  # 26 months + W
     assert (wti.mode, wti.status) == ("incremental", "succeeded")
     with env.factory() as s:
         override = s.scalar(select(Series.license_override).where(Series.code == "wti_spot"))
     assert override == "personal_use_only"  # classification preserved; not redistributable
+
+
+# --- licensing guard (ADR-0008) -----------------------------------------------------------------
+
+
+def add_daily(fake: FakeEia, code: str) -> None:
+    """SYNTHETIC daily rows, so a request that got past the guard would succeed."""
+    days = business_days(date(2026, 3, 2), 20)
+    add_series(fake, code, [(d, f"{50 + i}.00") for i, d in enumerate(days)])
+
+
+def eia_subset(*codes: str) -> Catalog:
+    """The real catalog limited to some EIA series (classifications unchanged)."""
+    return Catalog(
+        sources=CATALOG.sources,
+        series=tuple(
+            (src, spec) for src, spec in CATALOG.series if src == "eia" and spec.code in codes
+        ),
+    )
+
+
+def assert_nothing_happened(env: Env) -> None:
+    """No HTTP request, no run, no raw payload row, no raw file, no observation."""
+    assert env.fake.requests == []
+    assert env.runs() == []
+    with env.factory() as s:
+        assert s.scalar(select(func.count()).select_from(RawPayload)) == 0
+        assert s.scalar(select(func.count()).select_from(Observation)) == 0
+    assert [p for p in env.data_dir.rglob("*") if p.is_file()] == []
+
+
+@pytest.mark.parametrize("code", RESTRICTED)
+def test_each_restricted_series_is_refused_before_any_request_or_run(env: Env, code: str) -> None:
+    add_daily(env.fake, code)
+    with pytest.raises(EiaLicenseError, match=rf"{code} \(personal_use_only") as excinfo:
+        env.run(code)
+    assert "requires appropriate licensing" in str(excinfo.value)
+    assert_nothing_happened(env)
+
+
+def test_a_mixed_request_does_nothing_for_any_series(env: Env) -> None:
+    add_series(env.fake, "us_lng_exports", [("2025-01", "300"), ("2025-02", "301")])
+    add_daily(env.fake, "wti_spot")
+    with pytest.raises(EiaLicenseError, match="wti_spot"):
+        env.run("us_lng_exports", "wti_spot")
+    assert_nothing_happened(env)  # not even the unrestricted series was fetched
+
+
+def test_default_job_skips_restricted_series_and_ingests_the_others(env: Env) -> None:
+    # One unrestricted and the three restricted series, so only us_lng_exports needs data.
+    add_series(env.fake, "us_lng_exports", [("2025-01", "300"), ("2025-02", "301")])
+    for code in RESTRICTED:
+        add_daily(env.fake, code)
+    summary = env.run(catalog=eia_subset("us_lng_exports", *RESTRICTED))
+    assert [(o.code, o.status) for o in summary.outcomes] == [("us_lng_exports", "succeeded")]
+    assert summary.skipped_restricted == dict.fromkeys(RESTRICTED, License.PERSONAL_USE_ONLY)
+    assert summary.exit_code == 0
+    facets = {r.url.params.get("facets[series][0]") for r in env.fake.requests}
+    assert facets == {EXP["us_lng_exports"].facet_series}  # no request for a restricted series
+    assert [r.params["series_code"] for r in env.runs()] == ["us_lng_exports"]
+
+
+def test_unrestricted_series_ingest_normally(env: Env) -> None:
+    add_series(env.fake, STORAGE, weekly(10))
+    summary = env.run(STORAGE)
+    assert [(o.code, o.status) for o in summary.outcomes] == [(STORAGE, "succeeded")]
+    assert summary.skipped_restricted == {}
+    assert len(env.observations(STORAGE)) == 10
+
+
+@pytest.mark.parametrize("code", RESTRICTED)
+def test_per_series_ingestion_refuses_restricted_series_before_opening_a_run(
+    env: Env, code: str
+) -> None:
+    # Defense in depth: the per-series step checks the license again, so a caller that skipped
+    # select_series still cannot open a run or send a request for a restricted series.
+    add_daily(env.fake, code)
+    with env.factory() as s:
+        source_id = s.scalars(select(Source.id).where(Source.code == "eia")).one()
+    recorder = EiaRawRecorder(env.factory, RawPayloadStore(env.data_dir), source_id)
+    with env.client_factory(recorder) as client, pytest.raises(EiaLicenseError, match=code):
+        eia_job._ingest_series(
+            client,
+            recorder,
+            env.factory,
+            spec=SPECS[code],
+            license_=License.PERSONAL_USE_ONLY,
+            expected=EXP[code],
+            source_id=source_id,
+            series_id=env.series_id(code),
+            full=False,
+            page_size=50,
+        )
+    assert_nothing_happened(env)
 
 
 # --- configuration ------------------------------------------------------------------------------
@@ -537,6 +644,38 @@ def test_cli_reports_rejection_with_exit_code_2(
 def test_cli_rejects_unknown_series(cli_env: Env, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["ingest", "eia", "--series", "nope"]) == 1
     assert "unknown EIA series" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("code", RESTRICTED)
+def test_cli_refuses_each_restricted_series_cleanly(
+    cli_env: Env, capsys: pytest.CaptureFixture[str], code: str
+) -> None:
+    add_daily(cli_env.fake, code)
+    assert main(["ingest", "eia", "--series", code]) == 1
+    captured = capsys.readouterr()
+    assert captured.out.startswith(
+        f"error: restricted EIA series cannot be ingested: {code} (personal_use_only; "
+        "original source: Refinitiv, an LSEG business)."
+    )
+    assert "requires appropriate licensing" in captured.out
+    assert "Traceback" not in captured.out + captured.err
+    assert_nothing_happened(cli_env)
+
+
+def test_cli_default_run_reports_skipped_restricted_series(
+    cli_env: Env, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(eia_job, "load_catalog", lambda: eia_subset(STORAGE, *RESTRICTED))
+    add_series(cli_env.fake, STORAGE, weekly(10))
+    assert main(["ingest", "eia"]) == 0
+    out = capsys.readouterr().out
+    for code in RESTRICTED:
+        assert (
+            f"skipped {code}: licensed personal_use_only; not ingested without appropriate "
+            "licensing" in out
+        )
+    assert "1 series: 1 succeeded" in out
+    assert [r.params["series_code"] for r in cli_env.runs()] == [STORAGE]
 
 
 def test_ingestion_never_stores_the_api_key(env: Env) -> None:

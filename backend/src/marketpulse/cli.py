@@ -62,11 +62,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     eia = ingest_sub.add_parser(
         "eia",
-        help="Ingest EIA series as first-seen snapshots (default: all catalog series)",
+        help="Ingest EIA series as first-seen snapshots (default: all permitted catalog series)",
         description="Fetch EIA observations and record them as first-seen snapshots (EIA "
         "publishes no vintages; version times are when Market Pulse retrieved the data). "
         "Series with no stored data get a full snapshot; others an incremental one "
         "(lookback 90 days / 26 weeks / 26 months). "
+        "Series licensed personal_use_only are never ingested: requesting one is an error "
+        "(exit 1), and a default run skips them. "
         "Exit codes: 0 all succeeded, 1 any series failed, 2 some series partial "
         "(snapshot rejected, nothing changed).",
     )
@@ -74,8 +76,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--series",
         nargs="+",
         metavar="CODE",
-        help="Catalog series codes to ingest (e.g. wti_spot l48_gas_storage); "
-        "default: all EIA series",
+        help="Catalog series codes to ingest (e.g. us_lng_exports l48_gas_storage); "
+        "default: all EIA series whose license permits ingestion",
     )
     eia.add_argument(
         "--full",
@@ -347,6 +349,11 @@ def _ingest_eia_command(series: list[str] | None, *, full: bool) -> int:
     finally:
         engine.dispose()
 
+    for code, license_ in summary.skipped_restricted.items():
+        print(
+            f"skipped {code}: licensed {license_.value}; not ingested without appropriate "
+            "licensing (see docs/data-sources.md)"
+        )
     header = (
         f"{'series':<24} {'mode':<11} {'status':<11} {'fetched':>8} {'inserted':>8} "
         f"{'revised':>7} {'unchanged':>9} {'vanished':>8} {'issues':>6}  run"

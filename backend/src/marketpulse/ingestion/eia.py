@@ -38,6 +38,11 @@ error message. A retry is a new run with a new fetch and a fresh `snapshot_at`. 
 independent: one failing does not stop the others. Configuration problems (including a missing,
 empty, or blank EIA_API_KEY) stop the job before any network request or run.
 
+Licensing (ADR-0008): a series whose effective catalog license (its `license_override`, else the
+source's license) is in BLOCKED_LICENSES is never ingested through the application. Requesting
+one by code raises EiaLicenseError before any network request or run; a default (all-series) job
+leaves such series out and reports them in `skipped_restricted`. There is no override.
+
 The disappearance threshold (more than 5 periods or more than 1% of periods in scope) is applied
 unchanged by the planner; incremental windows only narrow the scope, never the threshold.
 """
@@ -60,6 +65,7 @@ from marketpulse.ingestion.runs import IngestionRunTracker, RunFinalizationError
 from marketpulse.ingestion.snapshot_writer import SnapshotTimeError
 from marketpulse.ingestion.snapshots import SnapshotObservation, SnapshotScope
 from marketpulse.sources.catalog import Catalog, SeriesSpec, load_catalog
+from marketpulse.sources.catalog.schema import License
 from marketpulse.sources.eia import MAX_ROWS_PER_REQUEST
 from marketpulse.sources.eia.client import (
     DATASET_DATA,
@@ -122,8 +128,17 @@ REQUEST_REJECTED_STATUSES = frozenset({400, 404})
 _EIA_BASE = urlsplit(EIA_BASE_URL)
 
 
+# Licenses under which a series is never ingested through the application (ADR-0008). Taken from
+# the catalog classification, never from a list of series codes.
+BLOCKED_LICENSES: frozenset[License] = frozenset({License.PERSONAL_USE_ONLY})
+
+
 class EiaIngestionConfigError(RuntimeError):
     """The job cannot start (no API key, catalog not synced, unknown series code)."""
+
+
+class EiaLicenseError(EiaIngestionConfigError):
+    """A requested series is licensed in a way that does not permit ingestion."""
 
 
 class EiaProvenanceError(RuntimeError):
@@ -357,6 +372,8 @@ class SeriesOutcome:
 @dataclass
 class EiaIngestionSummary:
     outcomes: list[SeriesOutcome] = field(default_factory=list)
+    # Restricted series left out of a default (all-series) job: code -> effective license.
+    skipped_restricted: dict[str, License] = field(default_factory=dict)
 
     @property
     def failed(self) -> list[SeriesOutcome]:
@@ -385,16 +402,58 @@ def default_client_factory(settings: Settings) -> ClientFactory:
     return factory
 
 
-def select_series(catalog: Catalog, codes: Sequence[str] | None) -> list[SeriesSpec]:
+def effective_license(catalog: Catalog, spec: SeriesSpec) -> License:
+    """The series' license override, else its source's license (the catalog classification)."""
+    return spec.license_override or catalog.sources[SOURCE_CODE].license
+
+
+@dataclass(frozen=True)
+class SeriesSelection:
+    specs: list[SeriesSpec]  # series to ingest, all permitted
+    licenses: dict[str, License]  # code -> effective license, for every selected series
+    skipped_restricted: dict[str, License]  # blocked series left out of a default selection
+
+
+def _blocked_message(blocked: Sequence[tuple[SeriesSpec, License]]) -> str:
+    listed = "; ".join(
+        f"{spec.code} ({license_.value}; original source: {spec.original_source})"
+        for spec, license_ in blocked
+    )
+    return (
+        f"restricted EIA series cannot be ingested: {listed}. Their catalog license does not "
+        "permit ingestion through Market Pulse; ingesting them requires appropriate licensing "
+        "from the original source (see docs/data-sources.md and ADR-0008). Remove them from "
+        "the requested series; the other EIA series are unaffected."
+    )
+
+
+def select_series(catalog: Catalog, codes: Sequence[str] | None) -> SeriesSelection:
+    """The series to ingest. Restricted series are refused (by code) or left out (default)."""
     available = {spec.code: spec for spec in catalog.series_for(SOURCE_CODE)}
-    if not codes:
-        return list(available.values())
-    unknown = sorted(set(codes) - set(available))
-    if unknown:
-        raise EiaIngestionConfigError(
-            f"unknown EIA series code(s) {unknown}; available: {sorted(available)}"
-        )
-    return [available[code] for code in dict.fromkeys(codes)]
+    if codes:
+        unknown = sorted(set(codes) - set(available))
+        if unknown:
+            raise EiaIngestionConfigError(
+                f"unknown EIA series code(s) {unknown}; available: {sorted(available)}"
+            )
+        requested = [available[code] for code in dict.fromkeys(codes)]
+    else:
+        requested = list(available.values())
+    licenses = {spec.code: effective_license(catalog, spec) for spec in requested}
+    blocked = [
+        (spec, licenses[spec.code]) for spec in requested if licenses[spec.code] in BLOCKED_LICENSES
+    ]
+    if blocked and codes:
+        raise EiaLicenseError(_blocked_message(blocked))
+    skipped = {spec.code: license_ for spec, license_ in blocked}
+    specs = [spec for spec in requested if spec.code not in skipped]
+    return SeriesSelection(specs, {s.code: licenses[s.code] for s in specs}, skipped)
+
+
+def _require_ingestion_permitted(spec: SeriesSpec, license_: License) -> None:
+    """Per-series guard, checked again before a run is opened (defense in depth)."""
+    if license_ in BLOCKED_LICENSES:
+        raise EiaLicenseError(_blocked_message([(spec, license_)]))
 
 
 def _resolve_database_rows(
@@ -499,12 +558,22 @@ def ingest_eia(
     catalog: Catalog | None = None,
     page_size: int = MAX_ROWS_PER_REQUEST,
 ) -> EiaIngestionSummary:
-    """Ingest the selected EIA series (default: all in the catalog). Never raises per series."""
+    """Ingest the selected EIA series (default: all permitted ones). Never raises per series.
+
+    A series whose license is in BLOCKED_LICENSES raises EiaLicenseError when requested by code,
+    and is left out of a default job (listed in `skipped_restricted`), before any request or run.
+    """
     key = settings.eia_api_key
     if client_factory is None and (key is None or not key.get_secret_value().strip()):
         raise EiaIngestionConfigError("EIA_API_KEY is not set or is blank (set it in .env)")
     catalog = catalog or load_catalog()
-    specs = select_series(catalog, series_codes)
+    selection = select_series(catalog, series_codes)
+    specs = selection.specs
+    if selection.skipped_restricted:
+        logger.info(
+            "restricted EIA series left out (license does not permit ingestion): %s",
+            ", ".join(selection.skipped_restricted),
+        )
     try:
         expectations = {spec.code: expectation_for(spec) for spec in specs}
     except ValueError as exc:
@@ -514,7 +583,7 @@ def ingest_eia(
     recorder = EiaRawRecorder(
         session_factory, RawPayloadStore(settings.marketpulse_data_dir), source_id
     )
-    summary = EiaIngestionSummary()
+    summary = EiaIngestionSummary(skipped_restricted=dict(selection.skipped_restricted))
     try:
         client = (client_factory or default_client_factory(settings))(recorder)
     except EiaConfigError as exc:  # its messages never contain the key
@@ -527,6 +596,7 @@ def ingest_eia(
                     recorder,
                     session_factory,
                     spec=spec,
+                    license_=selection.licenses[spec.code],
                     expected=expectations[spec.code],
                     source_id=source_id,
                     series_id=series_ids[spec.code],
@@ -543,12 +613,14 @@ def _ingest_series(
     session_factory: sessionmaker[Session],
     *,
     spec: SeriesSpec,
+    license_: License,
     expected: EiaSeriesExpectation,
     source_id: int,
     series_id: int,
     full: bool,
     page_size: int,
 ) -> SeriesOutcome:
+    _require_ingestion_permitted(spec, license_)  # before the run row or any request exists
     tracker = IngestionRunTracker(
         session_factory,
         job=JOB_NAME,

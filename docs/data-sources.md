@@ -161,8 +161,12 @@ simulator of that behavior; **no EIA data has been ingested from the live API ye
   in the public domain; third-party items in EIA products may be protected.
 - **Catalog license:** `public_domain`, except **WTI, Brent, and Henry Hub spot prices**
   (`wti_spot`, `brent_spot`, `henry_hub_spot`), which are Refinitiv (LSEG) data republished by
-  EIA. They are classified **`personal_use_only`**: they are ingested by default for personal use,
-  but Market Pulse does not assume any right to redistribute or publicly display them. That
+  EIA. They are classified **`personal_use_only`**, and Market Pulse does not assume any right
+  to store, redistribute, or publicly display them. **The EIA ingestion job does not ingest
+  them:** a series whose effective catalog license (its `license_override`, else the source's
+  license) is `personal_use_only` is refused when requested by code (exit 1, before any HTTP
+  request or ingestion run) and skipped, with a notice, by a default run. There is no override;
+  ingesting them would require appropriate licensing from the original source. That
   classification stays until redistribution rights are confirmed.
 - **Attribution:** "Source: U.S. Energy Information Administration (EIA)".
 

@@ -109,9 +109,9 @@ EIA needs a free API key (<https://www.eia.gov/opendata/register.php>), added to
 
 ```bash
 uv run marketpulse probe eia                               # read-only live check; stores nothing
-uv run marketpulse ingest eia                              # all 12 EIA series
+uv run marketpulse ingest eia                              # all permitted EIA series (9 of 12)
 uv run marketpulse ingest eia --series l48_gas_storage     # selected series (catalog codes)
-uv run marketpulse ingest eia --series wti_spot --full     # full-history snapshot
+uv run marketpulse ingest eia --series us_lng_exports --full  # full-history snapshot
 ```
 
 EIA publishes no vintages, so each run records a **first-seen snapshot**: version times are
@@ -123,8 +123,10 @@ the periods checked) is rejected without changing anything, and the run exits 2 
 code 1 means a series failed or is `UNFINALIZED` (its outcome could not be recorded; the CLI
 says whether its observations had already been committed). A missing or blank `EIA_API_KEY`
 stops the job before any request.
-WTI, Brent, and Henry Hub spot prices are Refinitiv data classified `personal_use_only`: they
-are ingested for personal use only and must not be redistributed.
+WTI, Brent, and Henry Hub spot prices are Refinitiv data classified `personal_use_only`, and
+the application does not ingest them: requesting one with `--series` is an error (exit 1,
+before any request or run), and a default run skips them with a notice. The guard reads the
+catalog's license classification; there is no override.
 
 **Provenance.** Every successful provider response is saved byte-exact and compressed under
 `data/raw/` and recorded in `ops.raw_payloads` (redacted URL, retrieval time, SHA-256) *before*
