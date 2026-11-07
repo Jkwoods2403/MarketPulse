@@ -84,6 +84,14 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Take a full-history snapshot (reconciliation) even if data is already stored",
     )
+    ingest_sub.add_parser(
+        "ercot",
+        help="ERCOT ingestion (blocked: licensing clarification pending, ADR-0014)",
+        description="ERCOT ingestion is blocked until ERCOT answers licensing ticket SS0007218 "
+        "and the project owner's decision is recorded (ADR-0014). This command always exits 1 "
+        "before any network request, database connection, ingestion run, or file. It has no "
+        "options; the block cannot be lifted from the command line or the environment.",
+    )
 
     verify = sub.add_parser(
         "verify",
@@ -392,6 +400,23 @@ def _ingest_eia_command(series: list[str] | None, *, full: bool) -> int:
     return summary.exit_code
 
 
+def _ingest_ercot_command() -> int:
+    """Refuse ERCOT ingestion (ADR-0014) before settings, a database, or a client are created."""
+    from marketpulse.core.source_access import (
+        SourceIngestionBlockedError,
+        require_source_ingestion_permitted,
+    )
+
+    try:
+        require_source_ingestion_permitted("ercot")
+    except SourceIngestionBlockedError as exc:
+        print(f"error: {exc}")
+        return 1
+    # Only reachable if ERCOT were removed from the block list without a job being built.
+    print("error: no ERCOT ingestion job is implemented")
+    return 1
+
+
 def _catalog_command(command: str, *, dry_run: bool = False) -> int:
     from marketpulse.sources.catalog import CatalogError, load_catalog
 
@@ -480,6 +505,8 @@ def main(argv: list[str] | None = None) -> int:
         return _ingest_fred_command(args.series, full=args.full)
     elif args.command == "ingest" and args.ingest_command == "eia":
         return _ingest_eia_command(args.series, full=args.full)
+    elif args.command == "ingest" and args.ingest_command == "ercot":
+        return _ingest_ercot_command()
     return 0
 
 

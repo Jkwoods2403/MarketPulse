@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from marketpulse.core.versions import ObservationVersion
 from marketpulse.db.enums import VintageBasis
 from marketpulse.db.models import DataQualityIssue, Observation, Series
+from marketpulse.ingestion.source_guard import require_source_id_permitted
 from marketpulse.ingestion.version_apply import (
     OBSERVATION_LOCK_NAMESPACE,
     ConcurrentModificationError,
@@ -96,6 +97,7 @@ def write_versions(
     series = session.get(Series, series_id)
     if series is None:
         raise ValueError(f"series id {series_id} does not exist")
+    require_source_id_permitted(session, series.source_id)  # ADR-0014, before any write
     require_vintage_basis(series, VintageBasis.SOURCE_VINTAGE)
 
     lock_series(session, series_id)

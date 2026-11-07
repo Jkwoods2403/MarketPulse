@@ -57,6 +57,7 @@ from marketpulse.ingestion.snapshots import (
     StoredSnapshotVersion,
     plan_snapshot,
 )
+from marketpulse.ingestion.source_guard import require_source_id_permitted
 from marketpulse.ingestion.version_apply import (
     close_versions,
     confirm_versions,
@@ -122,6 +123,7 @@ def write_snapshot(
     series = session.get(Series, series_id)
     if series is None:
         raise ValueError(f"series id {series_id} does not exist")
+    require_source_id_permitted(session, series.source_id)  # ADR-0014, before any write
 
     lock_series(session, series_id)
     require_vintage_basis(series, VintageBasis.FIRST_SEEN)

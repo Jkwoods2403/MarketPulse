@@ -43,6 +43,7 @@ from marketpulse.db.models import IngestionRun
 from marketpulse.ingestion.observation_writer import WriteResult, write_versions
 from marketpulse.ingestion.snapshot_writer import SnapshotWriteResult, write_snapshot
 from marketpulse.ingestion.snapshots import SnapshotObservation, SnapshotScope
+from marketpulse.ingestion.source_guard import require_source_id_permitted
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +155,8 @@ class IngestionRunTracker:
 
     def __enter__(self) -> Self:
         with self._factory() as session, session.begin():
+            # A blocked source (ADR-0014) is refused before its run row exists.
+            require_source_id_permitted(session, self.source_id)
             run = IngestionRun(
                 job=self.job,
                 source_id=self.source_id,

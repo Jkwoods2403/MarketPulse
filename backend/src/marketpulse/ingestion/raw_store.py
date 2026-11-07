@@ -26,7 +26,9 @@ from pathlib import Path, PurePosixPath
 
 from sqlalchemy.orm import Session
 
+from marketpulse.core.source_access import require_source_ingestion_permitted
 from marketpulse.db.models import RawPayload
+from marketpulse.ingestion.source_guard import require_source_id_permitted
 from marketpulse.sources.http import FetchResult
 
 _SAFE_SEGMENT = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
@@ -72,7 +74,11 @@ class RawPayloadStore:
         return self._data_dir
 
     def save(self, source: str, dataset: str, result: FetchResult) -> StoredPayload:
-        """Save `result.content` compressed; return its path and hash."""
+        """Save `result.content` compressed; return its path and hash.
+
+        A blocked source (ADR-0014) is refused before any directory or file is created.
+        """
+        require_source_ingestion_permitted(source)
         _validate_segment("source", source)
         _validate_segment("dataset", dataset)
         retrieved = result.retrieved_at
@@ -142,7 +148,11 @@ def record_raw_payload(
     result: FetchResult,
     stored: StoredPayload,
 ) -> RawPayload:
-    """Add the `ops.raw_payloads` row linking a run to its saved payload (caller commits)."""
+    """Add the `ops.raw_payloads` row linking a run to its saved payload (caller commits).
+
+    A blocked source (ADR-0014) is refused before the row is added.
+    """
+    require_source_id_permitted(session, source_id)
     row = RawPayload(
         ingestion_run_id=ingestion_run_id,
         source_id=source_id,
