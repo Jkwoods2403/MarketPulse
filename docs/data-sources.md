@@ -12,6 +12,7 @@ The authoritative list of tracked series is the version-controlled catalog in
 |---|---|---|
 | [FRED](#fred-federal-reserve-bank-of-st-louis) | **Ingested** (12 series, full version history) | `attribution_required` |
 | [EIA](#eia-us-energy-information-administration) | Connector built (12 series, first-seen snapshots); not yet run against the live API | `public_domain`; 3 series `personal_use_only` |
+| [ERCOT](#ercot-electric-reliability-council-of-texas) | Design only; **ingestion blocked** pending ERCOT licensing inquiry SS0007218 | `no_redistribution` (planned, conservative) |
 
 ---
 
@@ -319,3 +320,85 @@ EIA publishes **no vintages**, so Market Pulse records what it saw and when
 | `l48_gas_storage` | NG.NW2_EPG0_SWO_R48_BCF.W | weekly | `public_domain` |
 | `us_dry_gas_production` | NG.N9070US2.M | monthly | `public_domain` |
 | `us_lng_exports` | NG.N9133US2.M | monthly | `public_domain` |
+
+---
+
+## ERCOT (Electric Reliability Council of Texas)
+
+*Terms reviewed 2026-11-07 against the documents listed below. **Design only: no ERCOT account,
+API request, or ingestion has been made.** ERCOT ingestion is blocked until ERCOT answers the
+licensing inquiry and the project owner decides
+([ADR-0014](adr/0014-ercot-licensing-and-ingestion-gate.md)). Storage and time handling are
+proposed in [ADR-0012](adr/0012-ercot-storage-and-timestamp-architecture.md) and
+[ADR-0013](adr/0013-ercot-market-time-and-daylight-saving.md).*
+
+### Terms reviewed
+
+| Document | Governs | Date shown |
+|---|---|---|
+| [ERCOT Terms of Use](https://www.ercot.com/help/terms), Sec. 1–10 | ercot.com and the reports and data posted on it | "Last updated: 07/20/2023" |
+| [Terms of Use for ERCOT Application Programmatic Interface (API)](https://www.ercot.com/help/terms/data-portal), Sec. A–H plus Data Access Portal and Developer Portal terms | "the ERCOT API, which includes the Data Access Portal site and the ERCOT Developer Portal site" | None |
+| [ERCOT Public API Applications](https://www.ercot.com/services/mdt/data-portal), [API Explorer Support](https://apiexplorer.ercot.com/support), [Registration and Authentication](https://developer.ercot.com/applications/pubapi/user-guide/registration-and-authentication/) | Point to the API Terms | None stated (the registration guide shows "October 26, 2026"; the page does not say what the date means) |
+
+No separate data-use agreement, license, or market-data restriction for public reports was found.
+Not reviewed: any confidentiality or protected-information provisions of the ERCOT Nodal
+Protocols (section not identified), content behind the ERCOT Public Portal login, and the Data
+Access Portal application (its page could not be read).
+
+### Findings
+
+| Question | Status | Source | Exact language |
+|---|---|---|---|
+| Store API data privately | **Confirmed** that ERCOT expects downloaded reports to be stored on the user's own hardware (an instruction, not a license grant) | API Terms, Data Access Portal terms, "Limitations on Downloads"; the Public API Applications page says the Data Access Portal includes API access | "Reports should be downloaded and stored on the users' own hardware to avoid downloading from the site multiple times during a yearly time period." / "...access to expired ERCOT public data though a web portal and directly, through the use of APIs." |
+| Keep raw API responses indefinitely | **Unresolved**: no retention period or deletion duty anywhere | Not addressed | None |
+| Personal, non-commercial research | **Confirmed for public ercot.com content; unresolved for API data** | Website Terms Sec. 5 | "The publicly available contents of this website may be used, reproduced, and redistributed, provided that the contents are not modified and that you maintain all copyright and other notices contained in the contents, including this Agreement." |
+| Commercial use; separate agreement | **Unresolved**: neither document mentions commercial use; written consent exists only for exceeding download limits | API Terms, Data Access Portal General Limitations | "...ERCOT may refuse such request or condition approval of the request on your agreement to additional terms and/or charges for that use" |
+| Redistribute derived charts, statistics, analyses | **Confirmed for public ercot.com raw data; unresolved for API data** | Website Terms Sec. 5 | "...raw data provided in public portions of this website may be used, reproduced, and redistributed in compilations, charts, and analyses without maintaining such notices. ERCOT does not guarantee the accuracy of any such compilations, charts, or analyses." |
+| Attribution | **Confirmed for ercot.com content**: notices kept when redistributed unmodified, not required for raw data in compilations, charts and analyses; the logo and name need permission. **Unresolved for API data** | Website Terms Sec. 5 and 9 | "The ERCOT logo, "ERCOT," and "The Texas Connection" are either trademarks or registered trademarks of ERCOT and may not be used without the prior written permission of ERCOT." |
+| API data vs. website reports | **Confirmed that different documents apply.** Whether Sec. 5 covers API copies is **unresolved** | API Terms (introduction, Sec. A, B, D, H); Website Terms Sec. 1, 5 | "By accessing or using ERCOT's API, you are agreeing to the below Terms of Use." |
+
+### Confirmed restrictions (API Terms)
+
+- Accounts (Sec. A): "Accounts registered by "bots" or other automated methods are not permitted.
+  You are responsible for protecting your log-in information and shall not share that information
+  with other parties."
+- Identity (Sec. B): "You will not misrepresent or mask either your identity or your Client's
+  identity when using the ERCOT API."
+- Limits (Sec. D; Data Access Portal General Limitations): "You agree to, and will not attempt to
+  circumvent, such limitations."
+- Repeat downloads ("Limitations on Downloads"): "You may not download the same report from the
+  Data Access Portal more than three times within a 12-month period." Whether this applies to
+  Public API requests, and what "the same report" means for them, is **unresolved**. Market
+  Pulse's rule of never sending the same request twice is a conservative internal safeguard; it
+  does not establish that the restriction is satisfied (ADR-0014).
+- Enforcement (introduction): "Violation of these Terms of Use may result in suspension or
+  termination of your access to the API, and any further legal action deemed appropriate by
+  ERCOT."
+- Changes (Website Terms Sec. 10): the terms may change "at any time without notice"; they are
+  re-read before each ERCOT phase gate.
+
+### Classification and licensing inquiry
+
+- **Catalog (planned):** license `no_redistribution`; access requirement `subscription_required`.
+  Both are conservative internal classifications, not legal conclusions (ADR-0014).
+- **Contact:** clientservices@ercot.com is an official ERCOT address, but the API Terms name it
+  only for requests to exceed download limits. For "questions or clarifications related to this
+  policy", API Terms Sec. H directs users to a ticket in the
+  [ERCOT Public Portal](https://www.publicportal.ercot.com/csp).
+- **Inquiry:** ticket **SS0007218**, submitted 2026-11-07 through the ERCOT Public Portal; initial
+  state New; priority 4 - Low. **Licensing clarification is pending.** When ERCOT answers, record
+  the reply date and exact wording here, followed by the project owner's explicit decision. No
+  ERCOT ingestion, staging included, happens before both are recorded (ADR-0014).
+- **Follow-up question (drafted, not submitted):** how ERCOT defines "the same report" for
+  Public API requests and counts API downloads toward the three-per-12-months limit. The text is
+  in ADR-0014, for the project owner to add to SS0007218.
+
+### API facts
+
+| Fact | Status | Source |
+|---|---|---|
+| Credentials: a subscription key header plus a one-hour ID token that cannot be refreshed | Verified | Registration and Authentication: "ID tokens are valid for one hour. There is no way to refresh an ID token." |
+| Earliest API data date: Dec. 11, 2023 | Verified | API Explorer Support: "The earliest date for which data can be obtained via the ERCOT Public API is Dec. 11, 2023." |
+| 30 requests per minute | **Not re-checked**; in no terms document | ERCOT developer documentation read during the research: "The API allows up to 30 requests per minute"; to be confirmed in the logged-in API Explorer |
+| U.S.-only access | **Unverified**; in no terms document | Stated in the first research revision; its source could not be re-identified; to be confirmed in the logged-in API Explorer |
+| Maximum page size, units, settlement point names in the price products, the repeated-hour flag rule | Unresolved | Read-only probe (ADR-0013, ADR-0014) |
