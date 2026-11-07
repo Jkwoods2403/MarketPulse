@@ -16,6 +16,14 @@ class License(StrEnum):
     NO_REDISTRIBUTION = "no_redistribution"
 
 
+class AccessRequirement(StrEnum):
+    """How a source's data may be fetched (separate from its license; ADR-0014)."""
+
+    OPEN = "open"
+    REGISTRATION_REQUIRED = "registration_required"  # a free account or API key
+    SUBSCRIPTION_REQUIRED = "subscription_required"  # an account plus a data-product subscription
+
+
 class VintageBasis(StrEnum):
     """What a series' version timestamps (vintage_start/vintage_end) mean.
 
@@ -34,6 +42,8 @@ class Frequency(StrEnum):
     MONTHLY = "monthly"
     QUARTERLY = "quarterly"
     ANNUAL = "annual"
+    HOURLY = "hourly"
+    FIFTEEN_MINUTE = "fifteen_minute"
 
 
 class ObservationStatus(StrEnum):

@@ -1,9 +1,16 @@
-# Data providers. Terms verified 2026-11-01 against the URLs below.
+# Data providers. EIA and FRED terms verified 2026-11-01, ERCOT terms 2026-11-07, against the
+# URLs below.
 #
 # license (ADR-0008): public_domain | attribution_required | personal_use_only | no_redistribution
 # A series can be more restrictive than its source via `license_override` in its series file.
 #
-# vintage_basis: source_vintage | first_seen
+# access_requirement (ADR-0014): open | registration_required | subscription_required
+#   How the data may be fetched, separate from the license (what may be done with it).
+#   registration_required: a free account or API key. subscription_required: an account plus a
+#   subscription to a data product.
+#
+# vintage_basis: source_vintage | first_seen (the default for the source's series; a series may
+# override it in its series file)
 #   source_vintage: the provider publishes real-time vintages (FRED/ALFRED).
 #   first_seen: the provider publishes no vintages; versions start when Market Pulse first
 #   retrieved a value. That time is NOT the provider's publication time. Immutable once synced.
@@ -14,6 +21,7 @@ sources:
     homepage_url: https://www.eia.gov/
     terms_url: https://www.eia.gov/about/copyrights_reuse.php
     license: public_domain
+    access_requirement: registration_required
     vintage_basis: first_seen
     attribution_text: "Source: U.S. Energy Information Administration (EIA)"
     reference_hosts: [eia.gov]
@@ -27,6 +35,7 @@ sources:
     homepage_url: https://fred.stlouisfed.org/
     terms_url: https://fred.stlouisfed.org/legal/
     license: attribution_required
+    access_requirement: registration_required
     vintage_basis: source_vintage
     attribution_text: "Source: original data producer, retrieved from FRED, Federal Reserve Bank of St. Louis"
     reference_hosts: [fred.stlouisfed.org]
@@ -35,3 +44,24 @@ sources:
       copyright notices that appear with the data. Series with a copyright notice are owned by
       third parties and need the owner's permission for anything beyond personal use; none of
       the series currently tracked carry such a notice (checked in each series' notes).
+
+  - code: ercot
+    name: Electric Reliability Council of Texas (ERCOT)
+    homepage_url: https://www.ercot.com/
+    terms_url: https://www.ercot.com/help/terms/data-portal
+    license: no_redistribution
+    access_requirement: subscription_required
+    # Default for ERCOT series (prices, actual load). Load-forecast series override it to
+    # source_vintage (ERCOT's own posting times; ADR-0012).
+    vintage_basis: first_seen
+    attribution_text: "Source: ERCOT"
+    reference_hosts: [ercot.com]
+    notes: >-
+      INGESTION BLOCKED (ADR-0014): ERCOT is in the code-level block list
+      (core/source_access.py) while licensing ticket SS0007218 is pending; nothing may be
+      ingested, staging included, until ERCOT's written answer and the project owner's decision
+      are recorded. no_redistribution and subscription_required are conservative internal
+      classifications, not legal conclusions. The Public API is governed by the API Terms
+      (terms_url); the website Terms of Use (https://www.ercot.com/help/terms) cover ercot.com.
+      The ERCOT logo and name may not be used without ERCOT's written permission (website
+      Terms Sec. 9). No ERCOT series are catalogued yet (they follow the read-only probe).

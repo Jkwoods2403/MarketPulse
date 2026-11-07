@@ -3,7 +3,7 @@
 import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
-from sqlalchemy import Engine, create_engine, inspect, text
+from sqlalchemy import Connection, Engine, create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 
 from marketpulse.db import migrations
@@ -136,6 +136,141 @@ def test_0003_refuses_to_guess_the_vintage_basis(test_db_url: str, migrated_engi
             assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0002"
             columns = {c["name"] for c in inspect(conn).get_columns("series", schema="ref")}
             assert "vintage_basis" not in columns
+        with engine.begin() as conn:
+            conn.execute(text(TRUNCATE_ALL))
+    finally:
+        engine.dispose()
+        migrations.upgrade(test_db_url)
+
+
+# --- 0004: source access requirement and interval frequencies ----------------------------------
+
+SEED_0003 = """
+INSERT INTO ref.sources (id, code, name, homepage_url, license)
+VALUES (1, 'fred', 'FRED (synthetic test row)', 'https://example.invalid', 'attribution_required'),
+       (2, 'eia', 'EIA (synthetic test row)', 'https://example.invalid', 'public_domain');
+INSERT INTO ref.series (id, source_id, source_series_id, code, name, category, frequency,
+                        period_convention, units, max_staleness, original_source, reference_url,
+                        vintage_basis)
+VALUES (1, 1, 'TEST1', 'fred_test', 'Synthetic', 'macro', 'monthly', 'month', 'Index',
+        interval '40 days', 'Synthetic', 'https://example.invalid/1', 'source_vintage'),
+       (2, 2, 'PET.TEST1.W', 'eia_test', 'Synthetic', 'crude_oil', 'weekly',
+        'week_ending_friday', 'MBBL', interval '10 days', 'Synthetic', 'https://example.invalid/2',
+        'first_seen');
+"""
+SOURCES_0003 = (
+    "SELECT id, code, name, homepage_url, terms_url, license, attribution_text, notes, "
+    "created_at, updated_at FROM ref.sources ORDER BY id"
+)
+SERIES_ALL = "SELECT * FROM ref.series ORDER BY id"
+HOURLY_SERIES = (
+    "INSERT INTO ref.series (id, source_id, source_series_id, code, name, category, frequency, "
+    "period_convention, units, max_staleness, original_source, reference_url, vintage_basis) "
+    "VALUES (3, 2, 'SYNTHETIC-H', 'hourly_test', 'Synthetic', 'electricity', 'hourly', "
+    "'hour_ending', 'MW', interval '2 days', 'Synthetic', 'https://example.invalid/3', "
+    "'first_seen')"
+)
+
+
+def source_columns(conn: Connection) -> set[str]:
+    return {c["name"] for c in inspect(conn).get_columns("sources", schema="ref")}
+
+
+def test_0004_classifies_existing_sources_and_preserves_rows(
+    test_db_url: str, migrated_engine: Engine
+) -> None:
+    migrations.downgrade(test_db_url, "0003")
+    engine = create_engine(test_db_url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(SEED_0003))
+            sources_before = conn.execute(text(SOURCES_0003)).all()
+            series_before = conn.execute(text(SERIES_ALL)).all()
+
+        migrations.upgrade(test_db_url, "0004")
+
+        with engine.begin() as conn:
+            assert conn.execute(text(SOURCES_0003)).all() == sources_before  # unchanged
+            assert conn.execute(text(SERIES_ALL)).all() == series_before
+            access = dict(
+                conn.execute(text("SELECT code, access_requirement FROM ref.sources")).all()
+            )
+            assert access == {"fred": "registration_required", "eia": "registration_required"}
+            conn.execute(text(HOURLY_SERIES))  # the widened frequency constraint accepts it
+        with pytest.raises(IntegrityError), engine.begin() as conn:
+            conn.execute(text("UPDATE ref.sources SET access_requirement = 'free' WHERE id = 1"))
+        with pytest.raises(IntegrityError), engine.begin() as conn:
+            conn.execute(text("UPDATE ref.sources SET access_requirement = NULL WHERE id = 1"))
+        with pytest.raises(IntegrityError), engine.begin() as conn:
+            conn.execute(text("UPDATE ref.series SET frequency = 'five_minute' WHERE id = 3"))
+        with engine.begin() as conn:
+            conn.execute(text(TRUNCATE_ALL))
+    finally:
+        engine.dispose()
+        migrations.upgrade(test_db_url)
+
+
+def test_0004_refuses_to_guess_an_access_requirement(
+    test_db_url: str, migrated_engine: Engine
+) -> None:
+    migrations.downgrade(test_db_url, "0003")
+    engine = create_engine(test_db_url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO ref.sources (id, code, name, homepage_url, license) VALUES "
+                    "(1, 'other', 'Synthetic', 'https://example.invalid', 'public_domain')"
+                )
+            )
+        with pytest.raises(IntegrityError):
+            migrations.upgrade(test_db_url, "0004")
+        with engine.connect() as conn:  # the failed upgrade was rolled back entirely
+            assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0003"
+            assert "access_requirement" not in source_columns(conn)
+        with engine.begin() as conn:
+            conn.execute(text(TRUNCATE_ALL))
+    finally:
+        engine.dispose()
+        migrations.upgrade(test_db_url)
+
+
+def test_0004_downgrade_refuses_while_interval_frequencies_are_in_use(
+    test_db_url: str, migrated_engine: Engine
+) -> None:
+    engine = create_engine(test_db_url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO ref.sources (id, code, name, homepage_url, license, "
+                    "access_requirement) VALUES (2, 'eia', 'Synthetic', "
+                    "'https://example.invalid', 'public_domain', 'registration_required')"
+                )
+            )
+            conn.execute(text(HOURLY_SERIES))
+        with pytest.raises(RuntimeError, match="1 series use a frequency added in 0004"):
+            migrations.downgrade(test_db_url, "0003")
+        with engine.connect() as conn:  # nothing was downgraded
+            assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0004"
+            assert "access_requirement" in source_columns(conn)
+        with engine.begin() as conn:
+            conn.execute(text(TRUNCATE_ALL))
+    finally:
+        engine.dispose()
+        migrations.upgrade(test_db_url)
+
+
+def test_0004_downgrade_restores_the_0003_schema(test_db_url: str, migrated_engine: Engine) -> None:
+    migrations.downgrade(test_db_url, "0003")
+    engine = create_engine(test_db_url)
+    try:
+        with engine.connect() as conn:
+            assert "access_requirement" not in source_columns(conn)
+        with engine.begin() as conn:
+            conn.execute(text(SEED_0003))
+        with pytest.raises(IntegrityError), engine.begin() as conn:
+            conn.execute(text(HOURLY_SERIES))  # the 0003 frequency constraint is back
         with engine.begin() as conn:
             conn.execute(text(TRUNCATE_ALL))
     finally:

@@ -54,11 +54,22 @@ Portal, the channel API Terms Sec. H names for questions about the policy:
   review does not satisfy this gate.
 - **Redistribution and public deployment** of ERCOT data or anything derived from it stay
   blocked until ERCOT's written clarification permits them.
-- **Enforcement in code (proposed; implemented in Step 2, not here):** a source-level ingestion
-  block, so every ingestion job refuses a blocked source before any HTTP request, run, raw
-  payload or file. The ERCOT source is created in the blocked state. Lifting the block is a
-  reviewed catalog change that cites the recorded answer and decision. The existing EIA guard
-  for `personal_use_only` series is not changed by this ADR.
+- **Enforcement in code (implemented):** a source-level ingestion block. `ercot` is listed in
+  `INGESTION_BLOCKED_SOURCES`, a read-only constant in `backend/src/marketpulse/core/source_access.py`
+  that is not read from the environment, settings, the command line, or the catalog. Every
+  shared ingestion write path refuses a blocked source before writing: the ingestion run
+  tracker (before the run row), the raw payload store (before any directory or file) and raw
+  payload rows, and both observation writers (before the series lock). `marketpulse ingest
+  ercot` refuses before creating settings, a database engine, a run, or an HTTP client. The
+  ERCOT source is in the catalog (code exactly `ercot`) and is synced to `ref.sources` in the
+  blocked state.
+- **Lifting the block** is a reviewed code change to `core/source_access.py` that removes
+  `ercot` from `INGESTION_BLOCKED_SOURCES` and cites ERCOT's written response to SS0007218 and
+  the project owner's recorded decision (both in `docs/data-sources.md`). It is deliberately
+  not a catalog change: ingestion functions accept a catalog at runtime, so a catalog flag could
+  be bypassed without changing the repository.
+- The existing EIA guard for `personal_use_only` series is separate and is not changed by this
+  ADR.
 - The `no_redistribution` value alone does not stop ingestion (the EIA guard blocks only
   `personal_use_only`); the gate above does.
 

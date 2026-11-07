@@ -34,8 +34,16 @@ class License(StrEnum):
     NO_REDISTRIBUTION = "no_redistribution"
 
 
+class AccessRequirement(StrEnum):
+    """How a source's data may be fetched, separate from its license (mirrors db.enums)."""
+
+    OPEN = "open"
+    REGISTRATION_REQUIRED = "registration_required"  # a free account or API key
+    SUBSCRIPTION_REQUIRED = "subscription_required"  # an account plus a data-product subscription
+
+
 class VintageBasis(StrEnum):
-    """Meaning of a source's version timestamps (mirrors db.enums.VintageBasis)."""
+    """Meaning of a series' version timestamps (mirrors db.enums.VintageBasis)."""
 
     SOURCE_VINTAGE = "source_vintage"  # the provider publishes real-time vintages (FRED)
     FIRST_SEEN = "first_seen"  # first retrieved by Market Pulse; not a publication time (EIA)
@@ -47,6 +55,8 @@ class Frequency(StrEnum):
     MONTHLY = "monthly"
     QUARTERLY = "quarterly"
     ANNUAL = "annual"
+    HOURLY = "hourly"
+    FIFTEEN_MINUTE = "fifteen_minute"
 
 
 class Category(StrEnum):
@@ -69,8 +79,15 @@ class SeasonalAdjustment(StrEnum):
     NOT_SEASONALLY_ADJUSTED = "not_seasonally_adjusted"
 
 
-# Which period conventions make sense for each frequency.
+# Which period conventions make sense for each frequency. A convention names how the provider
+# labels a period. Sub-daily conventions follow the existing "<unit>_ending" style
+# ("week_ending_friday"): "hour_ending" is a one-hour interval labeled by the clock hour in which
+# it ends (ERCOT "hour ending 1-24"); "fifteen_minute_ending" is a 15-minute interval labeled by
+# its end (ERCOT settlement intervals). Labels are in the provider's local market time; stored
+# interval identity is UTC (ADR-0012, ADR-0013).
 PERIOD_CONVENTIONS: dict[Frequency, frozenset[str]] = {
+    Frequency.HOURLY: frozenset({"hour_ending"}),
+    Frequency.FIFTEEN_MINUTE: frozenset({"fifteen_minute_ending"}),
     Frequency.DAILY: frozenset({"business_day", "calendar_day"}),
     Frequency.WEEKLY: frozenset(
         f"week_ending_{day}"
@@ -101,6 +118,8 @@ class SourceSpec(_Strict):
     homepage_url: str
     terms_url: str
     license: License
+    access_requirement: AccessRequirement
+    # Default for the source's series; a series may override it (SeriesSpec.vintage_basis).
     vintage_basis: VintageBasis
     attribution_text: Text
     # Hosts allowed in series reference_url values for this source (official pages only).
@@ -126,6 +145,9 @@ class SeriesSpec(_Strict):
     release_name: Text | None = None
     reference_url: str
     license_override: License | None = None
+    # Overrides the source's vintage_basis for this series (e.g. ERCOT load forecasts, which
+    # carry ERCOT's own posting times, under a first_seen source). Immutable once synced.
+    vintage_basis: VintageBasis | None = None
     max_staleness_days: int = Field(ge=1, le=400)
     notes: Text | None = None
     # Provider API metadata, verified against the live API and enforced by drift checks.

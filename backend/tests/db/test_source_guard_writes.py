@@ -23,11 +23,13 @@ from marketpulse.db.models import (
     Series,
     Source,
 )
+from marketpulse.ingestion.catalog_sync import sync_catalog
 from marketpulse.ingestion.observation_writer import write_versions
 from marketpulse.ingestion.raw_store import StoredPayload, record_raw_payload
 from marketpulse.ingestion.runs import IngestionRunTracker, record_series_versions
 from marketpulse.ingestion.snapshot_writer import write_snapshot
 from marketpulse.ingestion.snapshots import SnapshotObservation, SnapshotScope
+from marketpulse.sources.catalog import load_catalog
 from marketpulse.sources.http import FetchResult
 
 T1 = datetime(2026, 11, 7, 15, 0, tzinfo=UTC)
@@ -40,6 +42,7 @@ def make_source(session: Session, code: str) -> int:
         name=f"{code} (synthetic)",
         homepage_url="https://example.invalid",
         license="no_redistribution",
+        access_requirement="registration_required",
     )
     session.add(source)
     session.flush()
@@ -222,3 +225,28 @@ def test_a_permitted_source_is_unaffected(factory: sessionmaker[Session], ids: I
     assert run_id is not None
     assert result.inserted == 1
     assert counts(factory) == {**NOTHING, "runs": 1, "observations": 1}
+
+
+def test_the_catalog_synced_ercot_source_is_blocked(factory: sessionmaker[Session]) -> None:
+    """The real catalog's ERCOT source (Step 3A) is refused once synced; EIA and FRED are not."""
+    with factory() as s, s.begin():
+        sync_catalog(s, load_catalog())
+    with factory() as s:
+        source_ids = {
+            code: source_id for code, source_id in s.execute(select(Source.code, Source.id))
+        }
+    assert set(source_ids) == {"eia", "fred", "ercot"}
+
+    tracker = IngestionRunTracker(factory, job="ercot.observations", source_id=source_ids["ercot"])
+    with pytest.raises(SourceIngestionBlockedError), tracker:
+        pass
+    assert counts(factory) == NOTHING
+
+    for code in ("eia", "fred"):
+        with IngestionRunTracker(
+            factory, job=f"{code}.observations", source_id=source_ids[code]
+        ) as run:
+            pass
+        assert run.status is not None
+        assert run.status.value == "succeeded"
+    assert counts(factory) == {**NOTHING, "runs": 2}

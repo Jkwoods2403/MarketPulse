@@ -23,6 +23,7 @@ def series(session: Session) -> Series:
         name="Test Source (synthetic)",
         homepage_url="https://example.invalid",
         license="public_domain",
+        access_requirement="registration_required",
     )
     session.add(source)
     session.flush()
@@ -160,6 +161,7 @@ def test_series_without_provenance_is_rejected(session: Session, missing: str) -
         name="Test",
         homepage_url="https://example.invalid",
         license="public_domain",
+        access_requirement="registration_required",
     )
     session.add(source)
     session.flush()
@@ -184,7 +186,13 @@ def test_series_without_provenance_is_rejected(session: Session, missing: str) -
 def test_unknown_license_is_rejected(session: Session) -> None:
     assert_rejected(
         session,
-        Source(code="bad", name="Bad", homepage_url="https://example.invalid", license="free"),
+        Source(
+            code="bad",
+            name="Bad",
+            homepage_url="https://example.invalid",
+            license="free",
+            access_requirement="registration_required",
+        ),
     )
 
 

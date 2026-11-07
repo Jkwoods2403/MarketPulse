@@ -46,6 +46,7 @@ def ids(factory: sessionmaker[Session]) -> tuple[int, int]:
             name="FRED (test)",
             homepage_url="https://x.invalid",
             license="attribution_required",
+            access_requirement="registration_required",
         )
         s.add(source)
         s.flush()

@@ -8,9 +8,19 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from marketpulse.db.models import Series, Source
-from marketpulse.ingestion.catalog_sync import CatalogSyncError, sync_catalog
-from marketpulse.sources.catalog import Catalog, SeriesSpec, load_catalog
-from marketpulse.sources.catalog.schema import VintageBasis
+from marketpulse.ingestion.catalog_sync import (
+    CatalogSyncError,
+    effective_vintage_basis,
+    sync_catalog,
+)
+from marketpulse.sources.catalog import Catalog, SeriesSpec, SourceSpec, load_catalog
+from marketpulse.sources.catalog.schema import (
+    AccessRequirement,
+    Category,
+    Frequency,
+    License,
+    VintageBasis,
+)
 
 
 @pytest.fixture
@@ -38,9 +48,9 @@ def count(session: Session, model: type[Source] | type[Series]) -> int:
 def test_initial_sync_creates_all_sources_and_series(session: Session, catalog: Catalog) -> None:
     report = sync_catalog(session, catalog)
 
-    assert sorted(report.sources_created) == ["eia", "fred"]
+    assert sorted(report.sources_created) == ["eia", "ercot", "fred"]
     assert len(report.series_created) == 24
-    assert count(session, Source) == 2
+    assert count(session, Source) == 3
     assert count(session, Series) == 24
 
 
@@ -51,12 +61,22 @@ def test_database_matches_catalog_field_by_field(session: Session, catalog: Cata
     sources = {s.code: s for s in session.scalars(select(Source))}
     for code, spec in catalog.sources.items():
         row = sources[code]
-        assert (row.name, row.homepage_url, row.terms_url, row.license, row.attribution_text) == (
+        assert (
+            row.name,
+            row.homepage_url,
+            row.terms_url,
+            row.license,
+            row.access_requirement,
+            row.attribution_text,
+            row.notes,
+        ) == (
             spec.name,
             spec.homepage_url,
             spec.terms_url,
             spec.license.value,
+            spec.access_requirement.value,
             spec.attribution_text,
+            spec.notes,
         )
 
     rows = {s.code: s for s in session.scalars(select(Series))}
@@ -81,7 +101,9 @@ def test_database_matches_catalog_field_by_field(session: Session, catalog: Cata
         assert row.max_staleness == timedelta(days=spec.max_staleness_days)
         assert row.notes == spec.notes
         assert row.is_active is True
-        assert row.vintage_basis == catalog.sources[source_code].vintage_basis.value
+        assert (
+            row.vintage_basis == effective_vintage_basis(spec, catalog.sources[source_code]).value
+        )
 
 
 def test_second_sync_is_idempotent(session: Session, catalog: Catalog) -> None:
@@ -90,7 +112,7 @@ def test_second_sync_is_idempotent(session: Session, catalog: Catalog) -> None:
 
     assert not report.has_changes
     assert len(report.series_unchanged) == 24
-    assert sorted(report.sources_unchanged) == ["eia", "fred"]
+    assert sorted(report.sources_unchanged) == ["eia", "ercot", "fred"]
 
 
 def test_metadata_change_updates_in_place(session: Session, catalog: Catalog) -> None:
@@ -202,3 +224,111 @@ def test_vintage_basis_change_is_refused_and_nothing_is_written(
         )
     )
     assert bases == {"first_seen"}
+
+
+# --- access requirement and per-series vintage_basis (Step 3A) ---------------------------------
+
+
+def test_sources_are_synced_with_license_and_access_requirement(
+    session: Session, catalog: Catalog
+) -> None:
+    sync_catalog(session, catalog)
+    rows = session.execute(select(Source.code, Source.license, Source.access_requirement)).all()
+    assert {code: (lic, access) for code, lic, access in rows} == {
+        "eia": ("public_domain", "registration_required"),
+        "fred": ("attribution_required", "registration_required"),
+        "ercot": ("no_redistribution", "subscription_required"),
+    }
+
+
+def test_access_requirement_change_updates_the_source_in_place(
+    session: Session, catalog: Catalog
+) -> None:
+    sync_catalog(session, catalog)
+    edited = replace(
+        catalog,
+        sources={
+            **catalog.sources,
+            "fred": catalog.sources["fred"].model_copy(
+                update={"access_requirement": AccessRequirement.OPEN}
+            ),
+        },
+    )
+    report = sync_catalog(session, edited)
+    assert report.sources_updated == ["fred"]
+    assert session.scalar(select(Source.access_requirement).where(Source.code == "fred")) == "open"
+
+
+GRID = SourceSpec(
+    code="grid_test",
+    name="Synthetic grid operator",
+    homepage_url="https://grid.example.com/",
+    terms_url="https://grid.example.com/terms",
+    license=License.NO_REDISTRIBUTION,
+    access_requirement=AccessRequirement.SUBSCRIPTION_REQUIRED,
+    vintage_basis=VintageBasis.FIRST_SEEN,
+    attribution_text="Source: synthetic",
+    reference_hosts=("grid.example.com",),
+)
+
+
+def grid_series(code: str, vintage_basis: VintageBasis | None) -> SeriesSpec:
+    return SeriesSpec(
+        code=code,
+        source_series_id=code.upper(),
+        name="Synthetic interval series",
+        category=Category.ELECTRICITY,
+        frequency=Frequency.HOURLY,
+        period_convention="hour_ending",
+        units="Synthetic units",
+        original_source="Synthetic",
+        reference_url="https://grid.example.com/series",
+        vintage_basis=vintage_basis,
+        max_staleness_days=2,
+    )
+
+
+def with_grid(catalog: Catalog, *specs: SeriesSpec) -> Catalog:
+    return replace(
+        catalog,
+        sources={**catalog.sources, "grid_test": GRID},
+        series=catalog.series + tuple(("grid_test", spec) for spec in specs),
+    )
+
+
+def test_series_vintage_basis_override_is_applied(session: Session, catalog: Catalog) -> None:
+    sync_catalog(
+        session,
+        with_grid(
+            catalog,
+            grid_series("grid_default_test", None),
+            grid_series("grid_forecast_test", VintageBasis.SOURCE_VINTAGE),
+        ),
+    )
+    bases = dict(session.execute(select(Series.code, Series.vintage_basis)).all())
+    assert bases["grid_default_test"] == "first_seen"  # the source's default
+    assert bases["grid_forecast_test"] == "source_vintage"  # the series' override
+    for source_code, spec in catalog.series:  # FRED and EIA still take their source's basis
+        assert bases[spec.code] == catalog.sources[source_code].vintage_basis.value
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        (VintageBasis.SOURCE_VINTAGE, VintageBasis.FIRST_SEEN),
+        (VintageBasis.SOURCE_VINTAGE, None),  # removing the override changes the effective basis
+        (None, VintageBasis.SOURCE_VINTAGE),
+    ],
+)
+def test_changing_a_series_vintage_basis_override_is_refused(
+    session: Session, catalog: Catalog, before: VintageBasis | None, after: VintageBasis | None
+) -> None:
+    sync_catalog(session, with_grid(catalog, grid_series("grid_series_test", before)))
+    stored = session.scalar(select(Series.vintage_basis).where(Series.code == "grid_series_test"))
+    with pytest.raises(CatalogSyncError, match="vintage_basis cannot change"):
+        sync_catalog(session, with_grid(catalog, grid_series("grid_series_test", after)))
+    session.expire_all()
+    assert (
+        session.scalar(select(Series.vintage_basis).where(Series.code == "grid_series_test"))
+        == stored
+    )

@@ -26,6 +26,7 @@ def stored(session: Session) -> tuple[int, int, int]:
         name="Test",
         homepage_url="https://example.invalid",
         license="public_domain",
+        access_requirement="registration_required",
     )
     session.add(source)
     session.flush()

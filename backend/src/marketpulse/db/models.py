@@ -32,6 +32,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from marketpulse.db.base import Base
 from marketpulse.db.enums import (
+    AccessRequirement,
     Frequency,
     License,
     ObservationStatus,
@@ -53,6 +54,9 @@ class Source(Base):
     __tablename__ = "sources"
     __table_args__ = (
         CheckConstraint(check_in("license", License), name="license_valid"),
+        CheckConstraint(
+            check_in("access_requirement", AccessRequirement), name="access_requirement_valid"
+        ),
         {"schema": "ref"},
     )
 
@@ -62,6 +66,8 @@ class Source(Base):
     homepage_url: Mapped[str] = mapped_column(Text)
     terms_url: Mapped[str | None] = mapped_column(Text)
     license: Mapped[str] = mapped_column(Text)
+    # How the data may be fetched (no default: every source is classified explicitly).
+    access_requirement: Mapped[str] = mapped_column(Text)
     attribution_text: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ, server_default=func.now())
@@ -101,9 +107,9 @@ class Series(Base):
     reference_url: Mapped[str] = mapped_column(Text)  # official series page
     notes: Mapped[str | None] = mapped_column(Text)
     license_override: Mapped[str | None] = mapped_column(Text)
-    # What version timestamps mean for this series (from its source; immutable once synced):
-    # "source_vintage" (provider vintages, FRED) or "first_seen" (first retrieved by Market
-    # Pulse, EIA; not a publication time).
+    # What version timestamps mean for this series (the series' catalog override, else its
+    # source's; immutable once synced): "source_vintage" (provider vintages, FRED) or
+    # "first_seen" (first retrieved by Market Pulse, EIA; not a publication time).
     vintage_basis: Mapped[str] = mapped_column(Text)
     max_staleness: Mapped[timedelta] = mapped_column(Interval)
     is_active: Mapped[bool] = mapped_column(server_default=text("true"))
