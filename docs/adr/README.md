@@ -19,6 +19,9 @@ update the old ADR's status to `Superseded by ADR-NNNN`.
 | [0009](0009-analytics-and-research-architecture.md) | Analytics and research architecture | Accepted |
 | [0010](0010-cost-and-deployment-strategy.md) | Cost and deployment strategy | Accepted |
 | [0011](0011-first-seen-snapshot-versioning.md) | First-seen snapshot versioning for providers without vintages | Accepted |
+| [0012](0012-ercot-storage-and-timestamp-architecture.md) | ERCOT storage and timestamp architecture | Proposed |
+| [0013](0013-ercot-market-time-and-daylight-saving.md) | ERCOT market time and daylight saving | Proposed |
+| [0014](0014-ercot-licensing-and-ingestion-gate.md) | ERCOT licensing classification and the pending-clarification ingestion gate | Proposed |
 
 ## Template
 
