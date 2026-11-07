@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from marketpulse.cli import main
+from marketpulse.core.source_access import ingestion_block_reason
 from marketpulse.db import enums as db_enums
 from marketpulse.sources.catalog import CatalogError, load_catalog, schema
 
@@ -31,7 +32,7 @@ VERIFIED_IDS = {
 
 def test_real_catalog_is_valid_and_complete() -> None:
     catalog = load_catalog()
-    assert set(catalog.sources) == {"eia", "fred"}
+    assert set(catalog.sources) == {"eia", "fred", "ercot"}
     for source, ids in VERIFIED_IDS.items():
         assert {s.source_series_id for s in catalog.series_for(source)} == ids
 
@@ -83,6 +84,9 @@ def test_catalog_vocabularies_match_database_check_constraints() -> None:
     assert {m.value for m in schema.License} == {m.value for m in db_enums.License}
     assert {m.value for m in schema.Frequency} == {m.value for m in db_enums.Frequency}
     assert {m.value for m in schema.VintageBasis} == {m.value for m in db_enums.VintageBasis}
+    assert {m.value for m in schema.AccessRequirement} == {
+        m.value for m in db_enums.AccessRequirement
+    }
 
 
 def test_vintage_basis_distinguishes_fred_vintages_from_eia_first_seen() -> None:
@@ -93,7 +97,7 @@ def test_vintage_basis_distinguishes_fred_vintages_from_eia_first_seen() -> None
 
 def test_cli_validate_reports_counts(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["catalog", "validate"]) == 0
-    assert "2 sources, 24 series" in capsys.readouterr().out
+    assert "3 sources, 24 series" in capsys.readouterr().out
 
 
 # --- temporary catalogs for failure cases ---------------------------------------------------
@@ -104,6 +108,7 @@ SOURCE: dict[str, Any] = {
     "homepage_url": "https://www.eia.gov/",
     "terms_url": "https://www.eia.gov/about/copyrights_reuse.php",
     "license": "public_domain",
+    "access_requirement": "registration_required",
     "vintage_basis": "first_seen",
     "attribution_text": "Source: EIA",
     "reference_hosts": ["eia.gov"],
@@ -251,7 +256,7 @@ def test_required_field_missing(tmp_path: Path, field: str) -> None:
     [
         ("code", "WTI-Spot"),
         ("category", "crypto"),
-        ("frequency", "hourly"),
+        ("frequency", "five_minute"),  # deferred; not a catalog frequency
         ("license_override", "free"),
         ("seasonal_adjustment", "SA"),
         ("max_staleness_days", 0),
@@ -406,3 +411,122 @@ def test_all_problems_are_reported_together(tmp_path: Path) -> None:
         },
     )
     assert len(problems_for(root)) >= 2
+
+
+# --- access requirement, interval frequencies, and the ERCOT source (Step 3A) ---------------
+
+
+def test_existing_sources_require_registration() -> None:
+    sources = load_catalog().sources
+    assert sources["fred"].access_requirement is schema.AccessRequirement.REGISTRATION_REQUIRED
+    assert sources["eia"].access_requirement is schema.AccessRequirement.REGISTRATION_REQUIRED
+
+
+def test_ercot_source_is_classified_conservatively_and_blocked() -> None:
+    catalog = load_catalog()
+    ercot = catalog.sources["ercot"]  # the exact code the source-level block list uses
+    assert ercot.code == "ercot"
+    assert ercot.license is schema.License.NO_REDISTRIBUTION
+    assert ercot.access_requirement is schema.AccessRequirement.SUBSCRIPTION_REQUIRED
+    assert ercot.vintage_basis is schema.VintageBasis.FIRST_SEEN
+    assert ingestion_block_reason(ercot.code) is not None
+    assert catalog.series_for("ercot") == []  # series follow the read-only probe (Step 3B)
+
+
+def test_only_ercot_is_blocked_among_catalog_sources() -> None:
+    blocked = {code for code in load_catalog().sources if ingestion_block_reason(code)}
+    assert blocked == {"ercot"}
+
+
+def test_no_real_series_overrides_its_sources_vintage_basis() -> None:
+    assert [spec.code for _, spec in load_catalog().series if spec.vintage_basis] == []
+
+
+def test_source_access_requirement_is_required(tmp_path: Path) -> None:
+    root = write_catalog(tmp_path, sources=[with_changes(SOURCE, access_requirement=...)])
+    assert any(
+        "sources.0.access_requirement" in p and "required" in p.lower() for p in problems_for(root)
+    )
+
+
+@pytest.mark.parametrize("value", ["free", "public", "subscription", ""])
+def test_invalid_source_access_requirement(tmp_path: Path, value: str) -> None:
+    root = write_catalog(tmp_path, sources=[with_changes(SOURCE, access_requirement=value)])
+    assert any("sources.0.access_requirement" in p for p in problems_for(root))
+
+
+# A synthetic interval-data source: no provider ID rule applies to it.
+GRID_SOURCE: dict[str, Any] = {
+    **SOURCE,
+    "code": "grid_test",
+    "name": "Synthetic grid operator",
+    "homepage_url": "https://grid.example.com/",
+    "terms_url": "https://grid.example.com/terms",
+    "license": "no_redistribution",
+    "access_requirement": "subscription_required",
+    "attribution_text": "Source: synthetic",
+    "reference_hosts": ["grid.example.com"],
+}
+GRID_SERIES: dict[str, Any] = {
+    "code": "grid_price_test",
+    "source_series_id": "SYNTHETIC-1",
+    "name": "Synthetic interval price",
+    "category": "electricity",
+    "frequency": "hourly",
+    "period_convention": "hour_ending",
+    "units": "Synthetic units",
+    "original_source": "Synthetic",
+    "reference_url": "https://grid.example.com/series/1",
+    "max_staleness_days": 2,
+}
+
+
+@pytest.mark.parametrize(
+    ("frequency", "convention"),
+    [("hourly", "hour_ending"), ("fifteen_minute", "fifteen_minute_ending")],
+)
+def test_interval_frequencies_accept_their_conventions(
+    tmp_path: Path, frequency: str, convention: str
+) -> None:
+    entry = with_changes(GRID_SERIES, frequency=frequency, period_convention=convention)
+    root = write_catalog(tmp_path, sources=[GRID_SOURCE], series={"grid_test": [entry]})
+    ((_, spec),) = load_catalog(root).series
+    assert spec.frequency.value == frequency
+    assert spec.period_convention == convention
+
+
+@pytest.mark.parametrize(
+    ("frequency", "convention"),
+    [
+        ("hourly", "fifteen_minute_ending"),
+        ("hourly", "calendar_day"),
+        ("fifteen_minute", "hour_ending"),
+        ("daily", "hour_ending"),
+        ("weekly", "fifteen_minute_ending"),
+    ],
+)
+def test_interval_conventions_must_match_their_frequency(
+    tmp_path: Path, frequency: str, convention: str
+) -> None:
+    entry = with_changes(GRID_SERIES, frequency=frequency, period_convention=convention)
+    root = write_catalog(tmp_path, sources=[GRID_SOURCE], series={"grid_test": [entry]})
+    assert any("period_convention" in p for p in problems_for(root))
+
+
+def test_eia_ids_cannot_claim_an_interval_frequency(tmp_path: Path) -> None:
+    entry = with_changes(SERIES, frequency="hourly", period_convention="hour_ending")
+    root = write_catalog(tmp_path, series={"eia": [entry]})
+    assert any("implies daily, but frequency is hourly" in p for p in problems_for(root))
+
+
+def test_series_may_override_its_sources_vintage_basis(tmp_path: Path) -> None:
+    entry = with_changes(GRID_SERIES, vintage_basis="source_vintage")
+    root = write_catalog(tmp_path, sources=[GRID_SOURCE], series={"grid_test": [entry]})
+    ((_, spec),) = load_catalog(root).series
+    assert spec.vintage_basis is schema.VintageBasis.SOURCE_VINTAGE
+
+
+def test_invalid_series_vintage_basis_is_rejected(tmp_path: Path) -> None:
+    entry = with_changes(GRID_SERIES, vintage_basis="published")
+    root = write_catalog(tmp_path, sources=[GRID_SOURCE], series={"grid_test": [entry]})
+    assert any("series.0.vintage_basis" in p for p in problems_for(root))

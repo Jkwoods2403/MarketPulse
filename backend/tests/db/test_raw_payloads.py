@@ -16,6 +16,7 @@ def test_record_raw_payload_links_run_source_and_file(session: Session, tmp_path
         name="Test",
         homepage_url="https://example.invalid",
         license="public_domain",
+        access_requirement="registration_required",
     )
     run = IngestionRun(job="test.job")
     session.add_all([source, run])

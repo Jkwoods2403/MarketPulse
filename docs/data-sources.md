@@ -8,11 +8,15 @@ is given for each.
 The authoritative list of tracked series is the version-controlled catalog in
 `backend/src/marketpulse/sources/catalog/data/` (`sources.yaml` plus one file per provider).
 
-| Source | Status | License (catalog) |
-|---|---|---|
-| [FRED](#fred-federal-reserve-bank-of-st-louis) | **Ingested** (12 series, full version history) | `attribution_required` |
-| [EIA](#eia-us-energy-information-administration) | Connector built (12 series, first-seen snapshots); not yet run against the live API | `public_domain`; 3 series `personal_use_only` |
-| [ERCOT](#ercot-electric-reliability-council-of-texas) | Design only; **ingestion blocked** pending ERCOT licensing inquiry SS0007218 | `no_redistribution` (planned, conservative) |
+| Source | Status | License (catalog) | Access requirement (catalog) |
+|---|---|---|---|
+| [FRED](#fred-federal-reserve-bank-of-st-louis) | **Ingested** (12 series, full version history) | `attribution_required` | `registration_required` (free API key) |
+| [EIA](#eia-us-energy-information-administration) | Connector built (12 series, first-seen snapshots); not yet run against the live API | `public_domain`; 3 series `personal_use_only` | `registration_required` (free API key) |
+| [ERCOT](#ercot-electric-reliability-council-of-texas) | Source catalogued, no series; **ingestion blocked** pending ERCOT licensing inquiry SS0007218 | `no_redistribution` (conservative) | `subscription_required` |
+
+The access requirement (ADR-0014) records how a source's data may be fetched (`open`,
+`registration_required`, or `subscription_required`), separately from the license, which records
+what may be done with it.
 
 ---
 
@@ -379,8 +383,21 @@ Access Portal application (its page could not be read).
 
 ### Classification and licensing inquiry
 
-- **Catalog (planned):** license `no_redistribution`; access requirement `subscription_required`.
-  Both are conservative internal classifications, not legal conclusions (ADR-0014).
+- **Catalog:** source code `ercot`, license `no_redistribution`, access requirement
+  `subscription_required`, default `vintage_basis` `first_seen` (future load-forecast series
+  override it to `source_vintage`). Both classifications are conservative internal
+  classifications, not legal conclusions (ADR-0014). No ERCOT series are catalogued yet; they
+  follow the read-only probe.
+- **Ingestion is blocked in code:** `ercot` is in `INGESTION_BLOCKED_SOURCES`
+  (`backend/src/marketpulse/core/source_access.py`). Syncing the catalog creates the
+  `ref.sources` row, but every ingestion run, raw payload and observation write for it is
+  refused, and `marketpulse ingest ercot` exits 1. Lifting the block is a reviewed code change
+  citing ERCOT's written response and the project owner's recorded decision.
+- **Period conventions for interval data** (catalog, used by future ERCOT series):
+  `hour_ending` (frequency `hourly`: a one-hour interval labeled by the hour in which it ends,
+  ERCOT "hour ending 1-24") and `fifteen_minute_ending` (frequency `fifteen_minute`: a 15-minute
+  settlement interval labeled by its end). Labels are local market time; stored interval
+  identity is UTC (ADR-0012, ADR-0013).
 - **Contact:** clientservices@ercot.com is an official ERCOT address, but the API Terms name it
   only for requests to exceed download limits. For "questions or clarifications related to this
   policy", API Terms Sec. H directs users to a ticket in the

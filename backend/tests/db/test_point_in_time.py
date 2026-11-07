@@ -28,6 +28,7 @@ def make_series(session: Session, code: str, basis: str) -> int:
         name="Test source",
         homepage_url="https://example.invalid",
         license="public_domain",
+        access_requirement="registration_required",
     )
     session.add(source)
     session.flush()

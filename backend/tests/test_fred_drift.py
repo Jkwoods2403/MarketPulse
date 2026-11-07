@@ -64,5 +64,18 @@ def test_catalog_without_seasonal_adjustment_warns() -> None:
 def test_every_catalog_frequency_and_adjustment_has_a_fred_code() -> None:
     from marketpulse.sources.fred.drift import FREQUENCY_CODES, SEASONAL_ADJUSTMENT_CODES
 
-    assert set(FREQUENCY_CODES.values()) == set(Frequency)
+    # FRED publishes no sub-daily series; interval frequencies (ERCOT) have no FRED code, and a
+    # FRED series wrongly catalogued with one fails the drift check as a frequency mismatch.
+    interval = {Frequency.HOURLY, Frequency.FIFTEEN_MINUTE}
+    assert set(FREQUENCY_CODES.values()) == set(Frequency) - interval
     assert set(SEASONAL_ADJUSTMENT_CODES.values()) == set(SeasonalAdjustment)
+
+
+@pytest.mark.parametrize("frequency", [Frequency.HOURLY, Frequency.FIFTEEN_MINUTE])
+def test_a_fred_series_catalogued_with_an_interval_frequency_is_drift(
+    frequency: Frequency,
+) -> None:
+    spec = spec_for("GDPC1").model_copy(update={"frequency": frequency})
+    report = check_catalog_drift(spec, gdpc1())
+    assert not report.ok
+    assert any(f"frequency is quarterly at FRED but {frequency.value}" in e for e in report.errors)

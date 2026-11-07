@@ -49,6 +49,7 @@ def make_source(session: Session, code: str) -> int:
         name=f"{code} (test)",
         homepage_url="https://example.invalid",
         license="public_domain",
+        access_requirement="registration_required",
     )
     session.add(source)
     session.flush()

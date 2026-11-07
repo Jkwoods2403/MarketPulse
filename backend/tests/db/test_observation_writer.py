@@ -31,6 +31,7 @@ def series_id(session: Session) -> int:
         name="FRED (test)",
         homepage_url="https://example.invalid",
         license="attribution_required",
+        access_requirement="registration_required",
     )
     session.add(source)
     session.flush()

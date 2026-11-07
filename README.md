@@ -199,7 +199,7 @@ Backend tests run isolated ([`backend/tests/isolation.py`](backend/tests/isolati
 | 1 | Data core and the FRED and EIA connectors | In progress: FRED ✅, EIA connector built (not yet run live) |
 | 2 | API v1: series, observations, freshness | |
 | 3 | Dashboard v1 | |
-| 4 | ERCOT and weather | ERCOT design proposed (ADR-0012 to ADR-0014); no ERCOT ingestion until ERCOT answers the licensing inquiry |
+| 4 | ERCOT and weather | ERCOT design proposed (ADR-0012 to ADR-0014); ERCOT source catalogued with ingestion blocked in code until ERCOT answers the licensing inquiry |
 | 5 | Equities and company intelligence | |
 | 6 | Events calendar and watchlists | |
 | 7 | News and daily briefing | |

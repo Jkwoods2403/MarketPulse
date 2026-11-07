@@ -5,9 +5,10 @@ Rules:
 - **Identity is immutable.** A series code must always map to the same (source, source series
   ID). Changing either would silently reassign stored observations, so it is refused; retire
   the old code and add a new one instead.
-- **vintage_basis is immutable too.** Each series takes its source's vintage_basis when it is
-  created. Changing it later would change what the stored version timestamps mean (provider
-  vintages vs. first seen by Market Pulse), so it is refused.
+- **vintage_basis is immutable too.** Each series takes its own catalog `vintage_basis` if it
+  sets one, else its source's, when it is created. Changing it later would change what the
+  stored version timestamps mean (provider vintages vs. first seen by Market Pulse), so it is
+  refused.
 - **Nothing is deleted.** Series removed from the catalog are marked inactive, because stored
   observations reference them. Re-adding a series reactivates it.
 - The whole sync happens in the caller's transaction: all problems are detected before any
@@ -23,8 +24,17 @@ from sqlalchemy.orm import Session
 
 from marketpulse.db.models import Series, Source
 from marketpulse.sources.catalog import Catalog, SeriesSpec, SourceSpec
+from marketpulse.sources.catalog.schema import VintageBasis
 
-SOURCE_FIELDS = ("name", "homepage_url", "terms_url", "license", "attribution_text", "notes")
+SOURCE_FIELDS = (
+    "name",
+    "homepage_url",
+    "terms_url",
+    "license",
+    "access_requirement",
+    "attribution_text",
+    "notes",
+)
 SERIES_FIELDS = (
     "name",
     "description",
@@ -78,9 +88,15 @@ def _source_values(spec: SourceSpec) -> dict[str, Any]:
         "homepage_url": spec.homepage_url,
         "terms_url": spec.terms_url,
         "license": spec.license.value,
+        "access_requirement": spec.access_requirement.value,
         "attribution_text": spec.attribution_text,
         "notes": spec.notes,
     }
+
+
+def effective_vintage_basis(spec: SeriesSpec, source: SourceSpec) -> VintageBasis:
+    """The series' own vintage_basis if the catalog sets one, else its source's."""
+    return spec.vintage_basis or source.vintage_basis
 
 
 def _series_values(spec: SeriesSpec, source: SourceSpec) -> dict[str, Any]:
@@ -97,7 +113,7 @@ def _series_values(spec: SeriesSpec, source: SourceSpec) -> dict[str, Any]:
         "reference_url": spec.reference_url,
         "notes": spec.notes,
         "license_override": spec.license_override.value if spec.license_override else None,
-        "vintage_basis": source.vintage_basis.value,
+        "vintage_basis": effective_vintage_basis(spec, source).value,
         "max_staleness": timedelta(days=spec.max_staleness_days),
         "is_active": True,
     }
@@ -133,12 +149,12 @@ def sync_catalog(session: Session, catalog: Catalog) -> SyncReport:
                     "identity changes are not allowed (retire the code and add a new one)"
                 )
             source_spec = catalog.sources.get(source_code)
-            wanted_basis = source_spec.vintage_basis.value if source_spec else None
+            wanted_basis = effective_vintage_basis(spec, source_spec).value if source_spec else None
             if wanted_basis is not None and existing.vintage_basis != wanted_basis:
                 problems.append(
                     f"series {spec.code!r} has vintage_basis {existing.vintage_basis!r} but its "
-                    f"source now says {wanted_basis!r}; vintage_basis cannot change because it "
-                    "defines what stored version timestamps mean"
+                    f"catalog entry now says {wanted_basis!r}; vintage_basis cannot change "
+                    "because it defines what stored version timestamps mean"
                 )
         db_source = db_sources.get(source_code)
         if db_source is not None:
