@@ -26,6 +26,10 @@ type Hover = { point: ChartPoint; x: number; width: number } | null;
 
 export type LineChartControls = { resetView: () => void };
 
+// The library's default (0.5 px) cannot fit a long history into a narrow panel: fitContent would
+// silently leave the oldest observations out of view. This fits tens of thousands of points.
+const MIN_BAR_SPACING_PX = 0.005;
+
 function token(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(`--color-${name}`).trim();
 }
@@ -116,7 +120,11 @@ export function LineChartCanvas({
         borderColor: token("border-strong"),
         scaleMargins: { top: legendTopMargin(height), bottom: 0.05 },
       },
-      timeScale: { borderColor: token("border-strong"), timeVisible: false },
+      timeScale: {
+        borderColor: token("border-strong"),
+        timeVisible: false,
+        minBarSpacing: MIN_BAR_SPACING_PX,
+      },
       crosshair: {
         mode: CrosshairMode.Normal,
         vertLine: { color: token("faint"), labelBackgroundColor: token("panel-raised") },

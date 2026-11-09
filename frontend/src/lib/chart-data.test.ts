@@ -32,6 +32,11 @@ describe("visibleSpan", () => {
     assert.equal(visibleSpan(points, -30, 40)?.zoomed, false);
   });
 
+  it("is not zoomed when a fitted view misses the ends by floating-point error", () => {
+    assert.equal(visibleSpan(points, 1e-9, 4 - 1e-9)?.zoomed, false);
+    assert.equal(visibleSpan(points, 1e-9, 4 - 1e-9)?.count, 5);
+  });
+
   it("reports only the whole points in view when zoomed", () => {
     const span = visibleSpan(points, 0.6, 3.4);
     assert.equal(span?.zoomed, true);

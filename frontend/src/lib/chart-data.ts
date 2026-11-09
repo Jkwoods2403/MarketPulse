@@ -48,6 +48,8 @@ export function countMissing(points: readonly ChartPoint[]): number {
   return points.filter((p) => p.value === undefined).length;
 }
 
+const INDEX_TOLERANCE = 1e-3;
+
 export type VisibleSpan = {
   firstIndex: number;
   lastIndex: number;
@@ -60,7 +62,9 @@ export type VisibleSpan = {
 
 /**
  * The observations in view, from a chart's logical range (fractional point indexes, which may
- * extend past either end of the data). Null when nothing is in view.
+ * extend past either end of the data). The chart computes the range in floating point, so a view
+ * fitted to the data can end a hair short of a point; that point still counts as in view. Null
+ * when nothing is in view.
  */
 export function visibleSpan(
   points: readonly ChartPoint[],
@@ -68,8 +72,8 @@ export function visibleSpan(
   to: number,
 ): VisibleSpan | null {
   const total = points.length;
-  const firstIndex = Math.max(0, Math.ceil(from));
-  const lastIndex = Math.min(total - 1, Math.floor(to));
+  const firstIndex = Math.max(0, Math.ceil(from - INDEX_TOLERANCE));
+  const lastIndex = Math.min(total - 1, Math.floor(to + INDEX_TOLERANCE));
   if (total === 0 || firstIndex > lastIndex) return null;
   return {
     firstIndex,
