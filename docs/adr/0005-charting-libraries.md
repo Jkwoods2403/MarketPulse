@@ -29,3 +29,26 @@ financial chart types.
 - Each library is used for what it does best; good performance on large data sets.
 - Two charting APIs to learn, hidden behind project-owned wrappers.
 - The TradingView attribution requirement must be honored in the UI.
+
+## Implementation status (2026-11-08)
+
+This note records how the decision has been applied so far. The decision above is unchanged,
+so no superseding ADR is needed.
+
+- **TradingView Lightweight Charts (5.2.1, pinned) renders every chart in dashboard v1.**
+  - The charts are historical line charts of the API's observations.
+  - They are wrapped in project-owned components in `frontend/src/components/charts/`
+    (`TimeSeriesChart`, `LineChartCanvas`, `RangeSelector`).
+  - Periods missing at source are drawn as gaps, never interpolated.
+  - Each chart has a text description for assistive technology.
+- **Apache ECharts is not used yet.** The quantitative analytics charts it was chosen for
+  (heatmaps, regressions, distributions, forecast bands) belong to the Analytics Lab (Milestone
+  9), which has not started. It is not installed, and will be added when that work begins.
+- **The TradingView attribution is honored.**
+  - Every chart shows TradingView's attribution logo (`attributionLogo: true`, linking to
+    tradingview.com).
+  - Every chart footer shows the text of the library's NOTICE file verbatim
+    ("TradingView Lightweight Charts™ Copyright (с) 2025 TradingView, Inc."), with links to
+    tradingview.com and the Apache License 2.0.
+  - The complete license and notice texts are in `frontend/THIRD_PARTY_NOTICES.md` and at
+    `/notices` in the application.

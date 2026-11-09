@@ -1,0 +1,1172 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Market Pulse API",
+    "description": "Energy-focused market intelligence. Every data point carries its source, timestamp, and freshness status.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/series": {
+      "get": {
+        "tags": [
+          "series"
+        ],
+        "summary": "List Series",
+        "description": "Every permitted series with its latest observation and freshness.",
+        "operationId": "list_series_series_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesListResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/series/{code}/observations": {
+      "get": {
+        "tags": [
+          "series"
+        ],
+        "summary": "Series Observations",
+        "description": "Observations of one permitted series, oldest period first.\n\nWithout `as_of`: the current version of each period. With `as_of`: the versions that were\nactive at that instant (no look-ahead). Periods are filtered by `period_start`.",
+        "operationId": "series_observations_series__code__observations_get",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Code"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "First period_start included",
+              "title": "Start"
+            },
+            "description": "First period_start included"
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Last period_start included",
+              "title": "End"
+            },
+            "description": "Last period_start included"
+          },
+          {
+            "name": "as_of",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Point-in-time: the versions active at this instant (timezone-aware)",
+              "title": "As Of"
+            },
+            "description": "Point-in-time: the versions active at this instant (timezone-aware)"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 5000,
+              "minimum": 1,
+              "default": 1000,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObservationsResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or not permitted series",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "List Metrics",
+        "description": "Calculated metrics (derived, not published) for every permitted series.",
+        "operationId": "list_metrics_metrics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricsResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Health",
+        "description": "Liveness check, with the data mode the API serves.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CalculatedMetric": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "period_change",
+              "year_over_year",
+              "seasonal_range",
+              "trailing_extremes"
+            ],
+            "title": "Kind"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "insufficient_history",
+              "missing_comparison"
+            ],
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "methodology": {
+            "type": "string",
+            "title": "Methodology"
+          },
+          "current": {
+            "$ref": "#/components/schemas/ObservationRef"
+          },
+          "comparison": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ObservationRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "absolute_change": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Absolute Change"
+          },
+          "change_units": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Units"
+          },
+          "basis_points": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basis Points"
+          },
+          "percent_change": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percent Change"
+          },
+          "percent_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percent Note"
+          },
+          "window": {
+            "items": {
+              "$ref": "#/components/schemas/ObservationRef"
+            },
+            "type": "array",
+            "title": "Window"
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ObservationRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ObservationRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "position_percent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position Percent"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "below",
+                  "within",
+                  "above"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "label",
+          "status",
+          "reason",
+          "methodology",
+          "current",
+          "comparison",
+          "absolute_change",
+          "change_units",
+          "basis_points",
+          "percent_change",
+          "percent_note",
+          "window",
+          "minimum",
+          "maximum",
+          "position_percent",
+          "position"
+        ],
+        "title": "CalculatedMetric",
+        "description": "A value derived by Market Pulse, never published by the source. `methodology` and the\nreferenced observations are enough to reproduce it."
+      },
+      "Environment": {
+        "type": "string",
+        "enum": [
+          "development",
+          "test",
+          "production"
+        ],
+        "title": "Environment"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "ErrorResponse",
+        "description": "Body of a 404 or 503 answer. Unknown and not-permitted series get the same 404."
+      },
+      "Freshness": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "stale",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "reference_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Reference Date"
+          },
+          "latest_period_end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Period End"
+          },
+          "age_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age Days"
+          },
+          "max_staleness_days": {
+            "type": "integer",
+            "title": "Max Staleness Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "reference_date",
+          "latest_period_end",
+          "age_days",
+          "max_staleness_days"
+        ],
+        "title": "Freshness",
+        "description": "Whether newer data should exist, judged from the latest period's end date.\n\n`fresh`: the latest period ended no more than `max_staleness_days` before\n`reference_date`. `stale`: longer ago. `unavailable`: nothing stored."
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "title": "Status"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "environment": {
+            "$ref": "#/components/schemas/Environment"
+          },
+          "data_mode": {
+            "type": "string",
+            "enum": [
+              "database",
+              "synthetic"
+            ],
+            "title": "Data Mode"
+          },
+          "server_time_utc": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time Utc"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "version",
+          "environment",
+          "data_mode",
+          "server_time_utc"
+        ],
+        "title": "HealthResponse"
+      },
+      "LatestObservation": {
+        "properties": {
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          },
+          "source_period": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Period"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "vintage_start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Vintage Start"
+          },
+          "first_retrieved_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "First Retrieved At"
+          },
+          "last_confirmed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Confirmed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "period_start",
+          "period_end",
+          "source_period",
+          "value",
+          "status",
+          "vintage_start",
+          "first_retrieved_at",
+          "last_confirmed_at"
+        ],
+        "title": "LatestObservation"
+      },
+      "MetricsResponse": {
+        "properties": {
+          "data_mode": {
+            "type": "string",
+            "enum": [
+              "database",
+              "synthetic"
+            ],
+            "title": "Data Mode"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesMetrics"
+            },
+            "type": "array",
+            "title": "Series"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data_mode",
+          "generated_at",
+          "series"
+        ],
+        "title": "MetricsResponse"
+      },
+      "NotCalculated": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "reason"
+        ],
+        "title": "NotCalculated"
+      },
+      "Observation": {
+        "properties": {
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          },
+          "source_period": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Period"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "vintage_start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Vintage Start"
+          },
+          "vintage_end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vintage End"
+          }
+        },
+        "type": "object",
+        "required": [
+          "period_start",
+          "period_end",
+          "source_period",
+          "value",
+          "status",
+          "vintage_start",
+          "vintage_end"
+        ],
+        "title": "Observation"
+      },
+      "ObservationRef": {
+        "properties": {
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          },
+          "source_period": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Period"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "period_start",
+          "period_end",
+          "source_period",
+          "value",
+          "status"
+        ],
+        "title": "ObservationRef",
+        "description": "A current-version observation a calculation used, exactly as stored."
+      },
+      "ObservationsResponse": {
+        "properties": {
+          "data_mode": {
+            "type": "string",
+            "enum": [
+              "database",
+              "synthetic"
+            ],
+            "title": "Data Mode"
+          },
+          "series": {
+            "$ref": "#/components/schemas/SeriesSummary"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/Observation"
+            },
+            "type": "array",
+            "title": "Observations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data_mode",
+          "series",
+          "as_of",
+          "start",
+          "end",
+          "limit",
+          "offset",
+          "total",
+          "observations"
+        ],
+        "title": "ObservationsResponse"
+      },
+      "SeriesListResponse": {
+        "properties": {
+          "data_mode": {
+            "type": "string",
+            "enum": [
+              "database",
+              "synthetic"
+            ],
+            "title": "Data Mode"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesSummary"
+            },
+            "type": "array",
+            "title": "Series"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data_mode",
+          "generated_at",
+          "series"
+        ],
+        "title": "SeriesListResponse"
+      },
+      "SeriesMetrics": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "units": {
+            "type": "string",
+            "title": "Units"
+          },
+          "frequency": {
+            "type": "string",
+            "title": "Frequency"
+          },
+          "period_convention": {
+            "type": "string",
+            "title": "Period Convention"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SourceInfo"
+          },
+          "synthetic": {
+            "type": "boolean",
+            "title": "Synthetic"
+          },
+          "calculated": {
+            "type": "boolean",
+            "const": true,
+            "title": "Calculated",
+            "default": true
+          },
+          "basis": {
+            "type": "string",
+            "const": "current_versions",
+            "title": "Basis",
+            "default": "current_versions"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ObservationRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/CalculatedMetric"
+            },
+            "type": "array",
+            "title": "Metrics"
+          },
+          "not_calculated": {
+            "items": {
+              "$ref": "#/components/schemas/NotCalculated"
+            },
+            "type": "array",
+            "title": "Not Calculated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "units",
+          "frequency",
+          "period_convention",
+          "source",
+          "synthetic",
+          "current",
+          "metrics",
+          "not_calculated"
+        ],
+        "title": "SeriesMetrics"
+      },
+      "SeriesSummary": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "frequency": {
+            "type": "string",
+            "title": "Frequency"
+          },
+          "period_convention": {
+            "type": "string",
+            "title": "Period Convention"
+          },
+          "units": {
+            "type": "string",
+            "title": "Units"
+          },
+          "seasonal_adjustment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seasonal Adjustment"
+          },
+          "original_source": {
+            "type": "string",
+            "title": "Original Source"
+          },
+          "reference_url": {
+            "type": "string",
+            "title": "Reference Url"
+          },
+          "vintage_basis": {
+            "type": "string",
+            "title": "Vintage Basis"
+          },
+          "license": {
+            "type": "string",
+            "title": "License"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SourceInfo"
+          },
+          "synthetic": {
+            "type": "boolean",
+            "title": "Synthetic"
+          },
+          "latest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LatestObservation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/Freshness"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "description",
+          "category",
+          "frequency",
+          "period_convention",
+          "units",
+          "seasonal_adjustment",
+          "original_source",
+          "reference_url",
+          "vintage_basis",
+          "license",
+          "source",
+          "synthetic",
+          "latest",
+          "freshness"
+        ],
+        "title": "SeriesSummary"
+      },
+      "SourceInfo": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "attribution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attribution"
+          },
+          "terms_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terms Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "attribution",
+          "terms_url"
+        ],
+        "title": "SourceInfo"
+      },
+      "ValidationErrorResponse": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ValidationIssue"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "ValidationErrorResponse",
+        "description": "Body of a 422 answer: a list of issues for malformed parameters (FastAPI's validation),\nor a single message for an inconsistent combination (e.g. start after end)."
+      },
+      "ValidationIssue": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Loc"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Msg"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationIssue"
+      }
+    }
+  }
+}
