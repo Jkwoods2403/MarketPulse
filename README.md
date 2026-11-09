@@ -285,8 +285,11 @@ from the numbered milestones in the roadmap below.
 | Phase | Status | Scope |
 |---|---|---|
 | 6.0 Read-only staging preflight | Complete (2026-11-09) | Staging audit |
-| 6.1 Staging dashboard activation | Complete and signed off (2026-11-09) | **Staging only** |
+| 6.1 Staging dashboard activation | Complete, signed off, and merged to `main` (PR #12, 2026-11-09) | **Staging only** |
 | 6.2 and later | **Not started**; requires separate approval | None |
+
+Merging PR #12 (merge commit `9d5c2e8`) updated the code on `main`. It deployed nothing to
+production.
 
 ### Phase 6.1: what changed in staging
 
