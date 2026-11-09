@@ -1,6 +1,7 @@
 """Logging setup: readable text in development, one JSON object per line in staging and production.
 
-Every line identifies the environment it came from.
+Application log lines identify the environment they came from. Uvicorn's own server and access
+lines do not, because they do not pass through this handler.
 """
 
 import json

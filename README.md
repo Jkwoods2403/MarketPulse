@@ -322,9 +322,10 @@ stored there. No provider was contacted, and nothing was ingested.
 - Row, sequence, and schema fingerprints were identical before and after the role change.
 - All 14,579 observations served by the API matched the database. An independent recomputation
   of the calculated metrics found 0 mismatches in 119 values.
-- A browser run covered every route, card, chart range, hover, zoom, and Reset view, with no
-  synthetic data, and no console or network errors in normal use. Restricted spot-price series
-  stayed unavailable, and ERCOT stayed absent.
+- A browser run covered every route and latest-value card, with no synthetic data, and no
+  console or network errors in normal use. Range buttons, hover, zoom, and Reset view were
+  exercised on three representative weekly and monthly charts, not on all 11. Restricted
+  spot-price series stayed unavailable, and ERCOT stayed absent.
 
 ### Staging and production are separate
 
@@ -340,9 +341,11 @@ stored there. No provider was contacted, and nothing was ingested.
 
 - Staging verification is not a production deployment, and passing it says nothing about the
   production database.
-- The macro dashboard has only been exercised with no data, so its charts and its daily,
-  quarterly, and basis-point metrics are unvalidated on real values.
-- The Stale label has not been seen on real data, because no stored series is stale yet.
+- In staging, the macro dashboard has only been exercised with no data (elsewhere, only with
+  synthetic fixtures and test data), so its charts and its daily, quarterly, and basis-point
+  metrics are unvalidated on real values.
+- The Stale label has not been seen on real data: as of 2026-11-09, no series stored in staging
+  was stale.
 - Staging's EIA data ages until it is next refreshed; no scheduler exists.
 
 ## Roadmap

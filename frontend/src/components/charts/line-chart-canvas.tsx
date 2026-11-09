@@ -124,6 +124,9 @@ export function LineChartCanvas({
         borderColor: token("border-strong"),
         timeVisible: false,
         minBarSpacing: MIN_BAR_SPACING_PX,
+        // Keep the view on the data: without these, zooming out shrinks the line to a sliver.
+        fixLeftEdge: true,
+        fixRightEdge: true,
       },
       crosshair: {
         mode: CrosshairMode.Normal,

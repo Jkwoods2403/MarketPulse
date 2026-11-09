@@ -120,7 +120,7 @@ export function TimeSeriesChart({
       aria-describedby={summaryId}
       aria-busy={load.kind === "loading"}
       className={cn(
-        "flex min-w-0 flex-col border bg-panel outline-none",
+        "flex min-w-0 flex-col border bg-panel",
         data?.series.synthetic ? "border-dashed border-status-delayed/50" : "border-border",
       )}
     >

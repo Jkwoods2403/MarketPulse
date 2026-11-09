@@ -11,7 +11,7 @@ The authoritative list of tracked series is the version-controlled catalog in
 | Source | Status | License (catalog) | Access requirement (catalog) |
 |---|---|---|---|
 | [FRED](#fred-federal-reserve-bank-of-st-louis) | **Ingested** (12 series, full version history) | `attribution_required` | `registration_required` (free API key) |
-| [EIA](#eia-us-energy-information-administration) | Connector built (12 series, first-seen snapshots); not yet run against the live API | `public_domain`; 3 series `personal_use_only` | `registration_required` (free API key) |
+| [EIA](#eia-us-energy-information-administration) | Connector built (12 series, first-seen snapshots); run against the live API in staging only (9 permitted series) | `public_domain`; 3 series `personal_use_only` | `registration_required` (free API key) |
 | [ERCOT](#ercot-electric-reliability-council-of-texas) | Source catalogued, no series; **ingestion blocked** pending ERCOT licensing inquiry SS0007218 | `no_redistribution` (conservative) | `subscription_required` |
 
 The access requirement (ADR-0014) records how a source's data may be fetched (`open`,
