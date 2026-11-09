@@ -8,7 +8,7 @@ function formatUtc(date: Date): string {
 export async function ApiStatus() {
   const result = await getApiHealth();
 
-  if (result.state === "unreachable") {
+  if (result.state !== "ok") {
     return (
       <dl className="grid grid-cols-[8rem_1fr] gap-y-1 font-mono text-xs">
         <dt className="text-muted">Status</dt>
@@ -34,6 +34,10 @@ export async function ApiStatus() {
       <dd className="text-fg">{data.version}</dd>
       <dt className="text-muted">Environment</dt>
       <dd className="text-fg">{data.environment}</dd>
+      <dt className="text-muted">Data mode</dt>
+      <dd className={data.data_mode === "synthetic" ? "text-status-delayed" : "text-fg"}>
+        {data.data_mode === "synthetic" ? "SYNTHETIC fixtures (not market data)" : "Database"}
+      </dd>
       <dt className="text-muted">Server time</dt>
       <dd className="text-fg">{formatUtc(new Date(data.server_time_utc))}</dd>
     </dl>
@@ -42,4 +46,32 @@ export async function ApiStatus() {
 
 export function ApiStatusFallback() {
   return <p className="font-mono text-xs text-muted">Checking backend…</p>;
+}
+
+/** One-line backend status for the top bar. Must be rendered inside <Suspense>. */
+export async function ApiStatusIndicator() {
+  const result = await getApiHealth();
+  if (result.state !== "ok") {
+    return (
+      <span className="text-down" title={`Backend unreachable: ${result.reason}`}>
+        ● API unreachable
+      </span>
+    );
+  }
+  if (result.data.data_mode === "synthetic") {
+    return (
+      <span className="text-status-delayed" title="Generated development fixtures, not market data">
+        ● API · synthetic data
+      </span>
+    );
+  }
+  return (
+    <span className="text-status-live" title={`Backend ${result.data.version}`}>
+      ● API connected
+    </span>
+  );
+}
+
+export function ApiStatusIndicatorFallback() {
+  return <span className="text-faint">● API …</span>;
 }

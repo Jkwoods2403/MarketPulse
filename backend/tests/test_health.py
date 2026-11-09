@@ -21,6 +21,7 @@ def test_health_reports_ok_version_and_environment() -> None:
     assert body["status"] == "ok"
     assert body["version"] == __version__
     assert body["environment"] == "test"
+    assert body["data_mode"] == "database"  # never synthetic outside the dev app
 
 
 def test_health_server_time_is_timezone_aware_utc() -> None:

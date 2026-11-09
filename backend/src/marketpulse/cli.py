@@ -20,6 +20,20 @@ def _build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--reload", action="store_true", help="Auto-reload on code changes")
+    serve.add_argument(
+        "--synthetic",
+        action="store_true",
+        help="Serve SYNTHETIC development fixtures instead of the database (development "
+        "environment only; values are generated, not market data)",
+    )
+
+    openapi = sub.add_parser(
+        "openapi",
+        help="Write the API's OpenAPI schema (no database or settings file needed)",
+        description="Print the OpenAPI schema, or write it with --output. The frontend's API "
+        "types are generated from backend/openapi.json; regenerate both after changing the API.",
+    )
+    openapi.add_argument("--output", type=Path, help="File to write (default: standard output)")
 
     db = sub.add_parser("db", help="Database migrations")
     db_sub = db.add_subparsers(dest="db_command", required=True)
@@ -480,12 +494,23 @@ def main(argv: list[str] | None = None) -> int:
         import uvicorn
 
         uvicorn.run(
-            "marketpulse.api.main:create_app",
+            "marketpulse.dev_app:create_synthetic_app"
+            if args.synthetic
+            else "marketpulse.api.main:create_app",
             factory=True,
             host=args.host,
             port=args.port,
             reload=args.reload,
         )
+    elif args.command == "openapi":
+        from marketpulse.api.openapi import render_openapi
+
+        text = render_openapi()
+        if args.output is None:
+            print(text, end="")
+        else:
+            args.output.write_text(text, encoding="utf-8", newline="\n")
+            print(f"wrote {args.output}")
     elif args.command == "db":
         from marketpulse.db import migrations
 

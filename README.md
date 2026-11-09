@@ -6,11 +6,18 @@ company research, and quantitative analytics in a professional terminal-style in
 
 It is both a daily monitoring tool and a data engineering and quantitative research project.
 
-> **Status: Milestone 1 (Data core) in progress.** FRED ingestion is complete: 12 rates, FX,
-> and macro series with full revision history (182,232 stored versions, verified against the
-> live API). The EIA connector (12 energy series, first-seen snapshot versioning) is built and
-> tested but has not yet been run against the live API. There is no API or dashboard for the
-> data yet.
+> **Status (2026-11-08):** the read-only data API (Milestone 2) and dashboard v1 (Milestone 3)
+> are implemented. They have been tested with synthetic development fixtures and isolated test
+> databases; the dashboard shows whatever the configured database holds.
+>
+> - **FRED:** ingestion is complete: 12 rates, FX, and macro series with full revision history
+>   (182,232 stored versions, verified against the live API).
+> - **EIA:** the connector (12 energy series, 9 of them permitted; first-seen snapshot
+>   versioning) is built and tested. As last recorded here it had not yet been run against the
+>   live API. **To confirm:** whether a live EIA ingestion has since been run.
+> - **Not available:** commodity spot prices (WTI, Brent, Henry Hub) are licensed for personal
+>   use only and are neither ingested nor displayed. ERCOT data is on hold pending ERCOT's
+>   licensing answer (ADR-0014).
 
 ## Principles
 
@@ -31,22 +38,79 @@ Providers → Ingestion (Python) → PostgreSQL → API (FastAPI) → Web UI (Ne
 
 | Layer | Technology |
 |---|---|
-| Frontend | Next.js 16, TypeScript, Tailwind CSS; TradingView Lightweight Charts and Apache ECharts (from Milestone 3) |
-| API | FastAPI, Pydantic |
-| Ingestion and analytics | Python 3.13, uv |
+| Frontend | Next.js 16 (App Router, server components), React 19, TypeScript, Tailwind CSS 4, TradingView Lightweight Charts 5 (Apache ECharts is planned for analytics charts and not yet used; ADR-0005) |
+| API | FastAPI, Pydantic; the OpenAPI schema is committed (`backend/openapi.json`) and the frontend's TypeScript types are generated from it with openapi-typescript |
+| Ingestion and analytics | Python 3.13, uv, SQLAlchemy 2, Alembic, httpx |
 | Storage | PostgreSQL 17 |
-| CI | GitHub Actions |
+| CI | GitHub Actions (backend checks and tests on PostgreSQL; frontend lint, types, tests, generated-file checks, build) |
 
 The API reads only from the database. It never calls an external provider while serving a
 request, so provider outages show up as clearly labeled stale data rather than broken pages.
 Module boundaries are enforced in CI. Decisions are recorded in
 [`docs/adr/`](docs/adr/README.md).
 
+### Data API
+
+Read-only HTTP API (FastAPI). Interactive documentation is served at `/docs`.
+
+| Endpoint | Returns |
+|---|---|
+| `GET /health` | Liveness, version, environment, and `data_mode` (`database` or `synthetic`) |
+| `GET /series` | Every permitted series with its metadata, source attribution, effective license, latest observation, and freshness (`fresh`, `stale`, `unavailable`, judged against each series' own release interval) |
+| `GET /series/{code}/observations` | Observations of one series, oldest first. Current versions by default; `as_of` returns the versions known at an instant (no look-ahead). `start`, `end`, `limit` (≤ 5000), `offset`, and `total` for paging |
+| `GET /metrics` | Calculated metrics per series (period change, year over year, five-year seasonal range, five-year low and high, as appropriate to each series), from current versions only, each with its methodology and the observations it used |
+
+- **Licensing is enforced on the server.** Series licensed for personal use only and sources
+  whose ingestion is blocked (ERCOT) are never served. Unknown and restricted codes get the
+  same `404 {"detail": "series not found"}`.
+- **Values are exact.** They are decimal strings as published (`"4.190"`), never floats.
+  Periods missing at source are returned as missing (`value: null`), never filled in.
+- **Errors are typed.** 404, 422, and 503 (database unavailable) bodies are declared in the
+  OpenAPI schema.
+
+### Dashboard
+
+Next.js application. The server calls the API; the browser never does (ADR-0004).
+
+| Module | Status |
+|---|---|
+| Market Overview, Natural Gas, Crude & Petroleum, Macroeconomics | Operational: latest values, calculated changes, and interactive historical charts |
+| Electricity | On hold: no ERCOT data is requested or shown (ADR-0014) |
+| Analytics, News, Watchlist, Journal | Planned: placeholder pages labeled as not operational |
+
+- **Every value is attributed.** It shows its source, period, retrieval time, and freshness.
+- **Calculated values are labeled.** They carry a "Calculated" label, separate from observed
+  values, with methodology and comparison periods.
+- **Spot prices are shown as unavailable,** with the licensing reason.
+- **Charts** use TradingView Lightweight Charts with its attribution. Third-party notices are at
+  `/notices` and in [`frontend/THIRD_PARTY_NOTICES.md`](frontend/THIRD_PARTY_NOTICES.md).
+- **Accessibility is checked.** The interface is keyboard accessible, meets WCAG AA contrast,
+  and gives each chart a text description. See [`frontend/README.md`](frontend/README.md).
+
+### Synthetic development mode
+
+To work on the interface without a database, serve generated fixtures:
+
+```bash
+cd backend && uv run marketpulse serve --synthetic    # development environment only (the default)
+cd frontend && pnpm dev                                # open http://localhost:3000
+```
+
+The safeguards:
+- The synthetic app refuses to start outside the development environment.
+- Values are a deterministic walk around 100 for every series, regardless of units, so they
+  cannot pass for real figures. They exist only in memory and are never written to a database.
+- Every response is marked `data_mode: "synthetic"`. The dashboard shows a banner, a
+  "Synthetic" tag on every value and calculation, and dashed, watermarked chart lines.
+- The same licensing filter applies: restricted series are never served, even as fixtures.
+- Production builds of the frontend refuse synthetic responses and show no values.
+
 ## Repository layout
 
 ```
 ├── backend/     Python package `marketpulse` (core, db, sources, ingestion, analytics, content, api)
-├── frontend/    Next.js application
+│   └── openapi.json   The API contract (generated; checked by tests)
+├── frontend/    Next.js application (THIRD_PARTY_NOTICES.md, third-party/ license sources)
 ├── research/    Exploratory notebooks (never imported by the app)
 ├── data/        Local raw provider responses (gitignored)
 ├── docs/adr/    Architecture decision records
@@ -60,7 +124,10 @@ Module boundaries are enforced in CI. Decisions are recorded in
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for PostgreSQL)
 - [uv](https://docs.astral.sh/uv/) (Python 3.13 is installed automatically if missing)
-- [Node.js](https://nodejs.org/) 20.9+ and [pnpm](https://pnpm.io/)
+- [Node.js](https://nodejs.org/) 24 (the version CI uses; 22.18 or later is required, because
+  the unit tests run TypeScript files directly with Node's built-in type stripping)
+- [pnpm](https://pnpm.io/) 12 (the exact version is pinned in `frontend/package.json`;
+  `corepack enable` or `npm install -g pnpm@12.16.1` installs it)
 
 ### Setup
 
@@ -181,7 +248,17 @@ uv run lint-imports
 uv run pytest                     # MARKETPULSE_REQUIRE_DB=1 makes database tests mandatory
 
 # frontend/
-pnpm lint && pnpm typecheck && pnpm build
+pnpm lint && pnpm typecheck && pnpm test && pnpm build
+pnpm api:check                    # generated API types match backend/openapi.json
+pnpm notices:check                # THIRD_PARTY_NOTICES.md matches installed packages
+```
+
+After changing an API response model or route, regenerate the contract and the frontend types
+together (CI fails if either is stale):
+
+```bash
+cd backend  && uv run marketpulse openapi --output openapi.json   # no database or .env needed
+cd frontend && pnpm api:types
 ```
 
 Backend tests run isolated ([`backend/tests/isolation.py`](backend/tests/isolation.py)):
@@ -197,8 +274,8 @@ Backend tests run isolated ([`backend/tests/isolation.py`](backend/tests/isolati
 |---|---|---|
 | 0 | Foundation: repo structure, tooling, CI | ✅ |
 | 1 | Data core and the FRED and EIA connectors | In progress: FRED ✅, EIA connector built (not yet run live) |
-| 2 | API v1: series, observations, freshness | |
-| 3 | Dashboard v1 | |
+| 2 | API v1: series, observations, freshness | ✅ Plus calculated metrics (`/metrics`) and a committed OpenAPI contract |
+| 3 | Dashboard v1 | ✅ Overview, Natural Gas, Crude & Petroleum, Macroeconomics; tested with synthetic fixtures and test databases |
 | 4 | ERCOT and weather | ERCOT design proposed (ADR-0012 to ADR-0014); ERCOT source catalogued with ingestion blocked in code until ERCOT answers the licensing inquiry |
 | 5 | Equities and company intelligence | |
 | 6 | Events calendar and watchlists | |

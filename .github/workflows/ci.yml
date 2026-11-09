@@ -60,7 +60,7 @@ jobs:
         run: uv run pytest -W error
 
   frontend:
-    name: Frontend (lint, types, build)
+    name: Frontend (lint, types, tests, generated files, build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -81,6 +81,12 @@ jobs:
         run: pnpm lint
       - name: TypeScript
         run: pnpm typecheck
+      - name: Unit tests
+        run: pnpm test
+      - name: API types match backend/openapi.json
+        run: pnpm api:check
+      - name: Third-party notices are current
+        run: pnpm notices:check
       - name: Production build
         run: pnpm build
         env:

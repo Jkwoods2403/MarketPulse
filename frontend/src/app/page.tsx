@@ -1,61 +1,104 @@
 import { Suspense } from "react";
 
+import { TimeSeriesChart } from "@/components/charts/time-series-chart";
+import { Section } from "@/components/dashboard/section";
+import { SeriesCards } from "@/components/dashboard/series-cards";
+import { UnavailablePricePanel } from "@/components/dashboard/unavailable-panel";
+import { FreshnessLegend } from "@/components/data/freshness-badge";
+import { SourceAttribution } from "@/components/data/source-attribution";
+import { PageHeader } from "@/components/shell/page-header";
 import { ApiStatus, ApiStatusFallback } from "@/components/system/api-status";
+import {
+  CRUDE_PETROLEUM,
+  ECONOMY,
+  KEY_INDICATORS,
+  METRICS,
+  NATURAL_GAS,
+} from "@/lib/dashboard";
 
-const PLANNED_MODULES = [
-  "Market Dashboard",
-  "Energy Intelligence",
-  "Company Intelligence",
-  "Daily Briefing",
-  "Market Journal",
-  "Market Connections",
-  "Analytics Lab",
-  "Calendar & Watchlists",
-] as const;
+const CRUDE_CARDS = CRUDE_PETROLEUM.slice(1, 5);
+const GAS_CARDS = NATURAL_GAS.slice(1);
+const MACRO_CARDS = [METRICS.ust2y, METRICS.ust30y, METRICS.usdIndex, ...ECONOMY];
 
-export default function Home() {
+export default function MarketOverview() {
   return (
-    <div className="flex flex-1 flex-col">
-      <header className="flex h-10 items-center justify-between border-b border-border bg-panel px-4">
-        <div className="flex items-baseline gap-3">
-          <span className="font-mono text-sm font-semibold tracking-wider text-accent">
-            MARKET PULSE
-          </span>
-          <span className="text-xs text-faint">Energy &amp; market intelligence</span>
-        </div>
-        <span className="font-mono text-[11px] uppercase tracking-wider text-faint">
-          Milestone 0 · Foundation
-        </span>
-      </header>
+    <div className="space-y-3">
+      <PageHeader
+        title="Market Overview"
+        description="Latest observed values, with calculated changes labeled separately, across crude oil, petroleum products, natural gas, and the macro backdrop, each with its period, retrieval time, freshness, and source. Sources publish with a delay: nothing on this terminal is a live quote, and daily, weekly, and monthly series are judged against their own release schedules."
+        aside={<FreshnessLegend />}
+      />
 
-      <main className="grid flex-1 grid-cols-1 gap-px bg-border p-px md:grid-cols-[2fr_1fr]">
-        <section className="bg-canvas p-4">
-          <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-muted">
-            Market data
-          </h2>
-          <p className="max-w-prose text-muted">
-            No market data is connected yet. Data ingestion from primary sources (EIA, FRED) begins
-            in Milestone 1. Every value shown here will carry its source, timestamp, and freshness
-            status.
-          </p>
-          <ul className="mt-4 grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
-            {PLANNED_MODULES.map((name) => (
-              <li key={name} className="bg-panel px-3 py-2 text-xs text-faint">
-                {name}
-              </li>
-            ))}
-          </ul>
-        </section>
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
+        <Section title="Energy prices" meta="Spot benchmarks" className="xl:col-span-3">
+          <UnavailablePricePanel />
+        </Section>
 
-        <aside className="bg-canvas p-4">
-          <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-muted">
-            System · Backend API
-          </h2>
+        <Section
+          title="Key indicators"
+          meta="Latest values"
+          className="xl:col-span-3"
+          footer={<SourceAttribution metrics={KEY_INDICATORS} />}
+        >
+          <SeriesCards metrics={KEY_INDICATORS} />
+        </Section>
+
+        <Section
+          title="Crude oil & petroleum"
+          meta="EIA · weekly"
+          href="/crude-petroleum"
+          className="xl:col-span-2"
+          footer={<SourceAttribution metrics={CRUDE_CARDS} />}
+        >
+          <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+            <TimeSeriesChart
+              code={METRICS.crudeStocks.code}
+              title={METRICS.crudeStocks.label}
+              height={200}
+            />
+            <SeriesCards metrics={CRUDE_CARDS} layout="stack" />
+          </div>
+        </Section>
+
+        <Section
+          title="Natural gas"
+          meta="EIA · weekly & monthly"
+          href="/natural-gas"
+          footer={<SourceAttribution metrics={GAS_CARDS} />}
+        >
+          <div className="space-y-2">
+            <TimeSeriesChart
+              code={METRICS.gasStorage.code}
+              title={METRICS.gasStorage.label}
+              height={180}
+            />
+            <SeriesCards metrics={GAS_CARDS} layout="stack" />
+          </div>
+        </Section>
+
+        <Section
+          title="Macroeconomic indicators"
+          meta="FRED · daily, monthly & quarterly"
+          href="/macro"
+          className="xl:col-span-2"
+          footer={<SourceAttribution metrics={MACRO_CARDS} />}
+        >
+          <div className="space-y-2">
+            <TimeSeriesChart
+              code={METRICS.ust10y.code}
+              title={METRICS.ust10y.label}
+              height={180}
+            />
+            <SeriesCards metrics={MACRO_CARDS} />
+          </div>
+        </Section>
+
+        <Section title="System" meta="Backend API">
           <Suspense fallback={<ApiStatusFallback />}>
             <ApiStatus />
           </Suspense>
-        </aside>
-      </main>
+        </Section>
+      </div>
     </div>
   );
 }
