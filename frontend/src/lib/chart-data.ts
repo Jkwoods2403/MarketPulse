@@ -48,6 +48,49 @@ export function countMissing(points: readonly ChartPoint[]): number {
   return points.filter((p) => p.value === undefined).length;
 }
 
+export type VisibleSpan = {
+  firstIndex: number;
+  lastIndex: number;
+  first: ChartObservation;
+  last: ChartObservation;
+  count: number;
+  total: number;
+  zoomed: boolean; // part of the loaded data is out of view
+};
+
+/**
+ * The observations in view, from a chart's logical range (fractional point indexes, which may
+ * extend past either end of the data). Null when nothing is in view.
+ */
+export function visibleSpan(
+  points: readonly ChartPoint[],
+  from: number,
+  to: number,
+): VisibleSpan | null {
+  const total = points.length;
+  const firstIndex = Math.max(0, Math.ceil(from));
+  const lastIndex = Math.min(total - 1, Math.floor(to));
+  if (total === 0 || firstIndex > lastIndex) return null;
+  return {
+    firstIndex,
+    lastIndex,
+    first: points[firstIndex].raw,
+    last: points[lastIndex].raw,
+    count: lastIndex - firstIndex + 1,
+    total,
+    zoomed: firstIndex > 0 || lastIndex < total - 1,
+  };
+}
+
+const LEGEND_BAND_PX = 60; // the legend's height plus its offset from the top of the chart
+const TIME_AXIS_PX = 28;
+const MAX_TOP_MARGIN = 0.45;
+
+/** Share of the price scale kept empty at the top, so the line never runs under the legend. */
+export function legendTopMargin(chartHeight: number): number {
+  return Math.min(MAX_TOP_MARGIN, LEGEND_BAND_PX / (chartHeight - TIME_AXIS_PX));
+}
+
 export type ChartSummary = {
   count: number;
   missing: number;

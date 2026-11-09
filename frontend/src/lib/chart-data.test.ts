@@ -2,7 +2,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { countMissing, summarizePoints, toChartPoints, type ChartObservation } from "./chart-data.ts";
+import {
+  countMissing,
+  legendTopMargin,
+  summarizePoints,
+  toChartPoints,
+  visibleSpan,
+  type ChartObservation,
+} from "./chart-data.ts";
 
 const obs = (start: string, end: string, value: string | null): ChartObservation => ({
   period_start: start,
@@ -10,6 +17,50 @@ const obs = (start: string, end: string, value: string | null): ChartObservation
   source_period: end,
   value,
   status: value === null ? "missing_at_source" : "ok",
+});
+
+describe("visibleSpan", () => {
+  const points = toChartPoints(
+    "month",
+    ["01", "02", "03", "04", "05"].map((m) => obs(`2026-${m}-01`, `2026-${m}-28`, m)),
+  );
+
+  it("is not zoomed when every point is in view, even past the data's ends", () => {
+    const span = visibleSpan(points, -0.5, 4.5);
+    assert.equal(span?.count, 5);
+    assert.equal(span?.zoomed, false);
+    assert.equal(visibleSpan(points, -30, 40)?.zoomed, false);
+  });
+
+  it("reports only the whole points in view when zoomed", () => {
+    const span = visibleSpan(points, 0.6, 3.4);
+    assert.equal(span?.zoomed, true);
+    assert.equal(span?.count, 3);
+    assert.equal(span?.total, 5);
+    assert.equal(span?.first.period_start, "2026-02-01");
+    assert.equal(span?.last.period_start, "2026-04-01");
+  });
+
+  it("treats a view that excludes only the newest point as zoomed", () => {
+    assert.equal(visibleSpan(points, 0, 3)?.zoomed, true);
+  });
+
+  it("returns null when nothing is in view or there is no data", () => {
+    assert.equal(visibleSpan(points, 1.2, 1.8), null);
+    assert.equal(visibleSpan(points, 9, 12), null);
+    assert.equal(visibleSpan([], 0, 4), null);
+  });
+});
+
+describe("legendTopMargin", () => {
+  it("reserves the legend's height on the chart sizes in use", () => {
+    assert.ok(Math.abs(legendTopMargin(220) - 60 / 192) < 1e-9);
+    assert.ok(Math.abs(legendTopMargin(180) - 60 / 152) < 1e-9);
+  });
+
+  it("never gives up more than the maximum share of a short chart", () => {
+    assert.equal(legendTopMargin(100), 0.45);
+  });
 });
 
 describe("toChartPoints", () => {
