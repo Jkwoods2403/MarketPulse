@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import {
   ApiStatusIndicator,
   ApiStatusIndicatorFallback,
+  EnvironmentBadge,
 } from "@/components/system/api-status";
 
 /** Terminal header: brand, data policy reminder, and backend status. */
@@ -22,6 +23,9 @@ export function TopBar() {
         </span>
       </div>
       <div className="flex shrink-0 items-center gap-4 font-mono text-[11px] uppercase tracking-wider">
+        <Suspense fallback={null}>
+          <EnvironmentBadge />
+        </Suspense>
         <span className="text-status-delayed">
           <span className="hidden md:inline">Delayed &amp; historical data · not live</span>
           <span className="md:hidden">Delayed data</span>

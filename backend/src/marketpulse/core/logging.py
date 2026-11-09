@@ -1,4 +1,7 @@
-"""Logging setup: readable text in development, one JSON object per line in production."""
+"""Logging setup: readable text in development, one JSON object per line in staging and production.
+
+Every line identifies the environment it came from.
+"""
 
 import json
 import logging
@@ -42,9 +45,14 @@ def install_http_log_redaction() -> None:
 class JsonFormatter(logging.Formatter):
     """Format records as single-line JSON with a UTC timestamp and any `extra=` fields."""
 
+    def __init__(self, environment: str) -> None:
+        super().__init__()
+        self.environment = environment
+
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, Any] = {
             "ts": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
+            "environment": self.environment,
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -60,10 +68,13 @@ class JsonFormatter(logging.Formatter):
 def configure_logging(settings: Settings) -> None:
     """Configure the root logger. Safe to call more than once."""
     handler = logging.StreamHandler(sys.stdout)
-    if settings.marketpulse_env is Environment.PRODUCTION:
-        handler.setFormatter(JsonFormatter())
+    environment = settings.marketpulse_env.value
+    if settings.marketpulse_env in (Environment.STAGING, Environment.PRODUCTION):
+        handler.setFormatter(JsonFormatter(environment))
     else:
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s"))
+        handler.setFormatter(
+            logging.Formatter(f"%(asctime)s %(levelname)-7s [{environment}] %(name)s: %(message)s")
+        )
     handler.addFilter(RedactingFilter())
 
     root = logging.getLogger()

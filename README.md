@@ -86,6 +86,8 @@ Next.js application. The server calls the API; the browser never does (ADR-0004)
   `/notices` and in [`frontend/THIRD_PARTY_NOTICES.md`](frontend/THIRD_PARTY_NOTICES.md).
 - **Accessibility is checked.** The interface is keyboard accessible, meets WCAG AA contrast,
   and gives each chart a text description. See [`frontend/README.md`](frontend/README.md).
+- **Non-production deployments are named.** With `MARKETPULSE_ENV=staging` the top bar of every
+  page shows a Staging badge, and `/health` and every log line report `staging`.
 
 ### Synthetic development mode
 
@@ -97,7 +99,7 @@ cd frontend && pnpm dev                                # open http://localhost:3
 ```
 
 The safeguards:
-- The synthetic app refuses to start outside the development environment.
+- The synthetic app refuses to start outside the development environment (staging included).
 - Values are a deterministic walk around 100 for every series, regardless of units, so they
   cannot pass for real figures. They exist only in memory and are never written to a database.
 - Every response is marked `data_mode: "synthetic"`. The dashboard shows a banner, a

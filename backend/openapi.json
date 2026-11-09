@@ -429,6 +429,7 @@
         "enum": [
           "development",
           "test",
+          "staging",
           "production"
         ],
         "title": "Environment"

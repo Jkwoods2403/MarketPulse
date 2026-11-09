@@ -19,6 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 class Environment(StrEnum):
     DEVELOPMENT = "development"
     TEST = "test"
+    STAGING = "staging"
     PRODUCTION = "production"
 
 

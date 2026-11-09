@@ -34,7 +34,7 @@ def client() -> TestClient:
     return TestClient(create_synthetic_app(settings(Environment.DEVELOPMENT), now=NOW))
 
 
-@pytest.mark.parametrize("env", [Environment.TEST, Environment.PRODUCTION])
+@pytest.mark.parametrize("env", [Environment.TEST, Environment.STAGING, Environment.PRODUCTION])
 def test_synthetic_app_refuses_outside_development(env: Environment) -> None:
     with pytest.raises(SyntheticModeError, match="only served in the development environment"):
         create_synthetic_app(settings(env), now=NOW)
@@ -145,6 +145,6 @@ def test_metric_plans_follow_series_semantics(client: TestClient) -> None:
 
 
 def test_metrics_endpoint_is_not_served_by_the_synthetic_app_outside_development() -> None:
-    for env in (Environment.TEST, Environment.PRODUCTION):
+    for env in (Environment.TEST, Environment.STAGING, Environment.PRODUCTION):
         with pytest.raises(SyntheticModeError):
             create_synthetic_app(settings(env), now=NOW)

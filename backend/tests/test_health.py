@@ -24,6 +24,14 @@ def test_health_reports_ok_version_and_environment() -> None:
     assert body["data_mode"] == "database"  # never synthetic outside the dev app
 
 
+def test_health_identifies_staging() -> None:
+    settings = Settings(_env_file=None, marketpulse_env=Environment.STAGING)  # type: ignore[call-arg]
+    body = TestClient(create_app(settings)).get("/health").json()
+
+    assert body["environment"] == "staging"
+    assert body["data_mode"] == "database"
+
+
 def test_health_server_time_is_timezone_aware_utc() -> None:
     body = make_client().get("/health").json()
 
