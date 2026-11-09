@@ -1,14 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
-import { LineChartCanvas } from "@/components/charts/line-chart-canvas";
+import { LineChartCanvas, type LineChartControls } from "@/components/charts/line-chart-canvas";
 import { RangeSelector } from "@/components/charts/range-selector";
 import { FreshnessBadge, SyntheticTag } from "@/components/data/freshness-badge";
 import { Skeleton, StateMessage } from "@/components/data/state-message";
+import { Button } from "@/components/ui/button";
 import type { ChartHistory } from "@/lib/api";
-import { countMissing, summarizePoints, toChartPoints, type ChartPoint } from "@/lib/chart-data";
+import {
+  countMissing,
+  summarizePoints,
+  toChartPoints,
+  type ChartPoint,
+  type VisibleSpan,
+} from "@/lib/chart-data";
 import type { RangeKey } from "@/lib/chart-range";
 import { cn } from "@/lib/cn";
 import { formatCadence, formatPeriod, formatUtcTimestamp, formatValue } from "@/lib/format";
@@ -25,7 +32,9 @@ type Load =
  *
  * Every chart shows its title, units, cadence, freshness, the exact range shown, the number of
  * observations and of periods missing at source, its source attribution, when Market Pulse last
- * retrieved the data, and the TradingView attribution. Synthetic fixtures are labeled.
+ * retrieved the data, and the TradingView attribution. Synthetic fixtures are labeled. When the
+ * user zooms or pans, the caption names the observations actually in view and a Reset view
+ * button returns to the whole selected range.
  *
  * The canvas is not readable by assistive technology, so the figure is described by a text
  * summary (range, latest, lowest and highest values with their periods, gaps), which is
@@ -48,6 +57,15 @@ export function TimeSeriesChart({
   const summaryId = `${id}-summary`;
   const [range, setRange] = useState<RangeKey | null>(null);
   const [load, setLoad] = useState<Load>({ kind: "loading", previous: null });
+  const [span, setSpan] = useState<VisibleSpan | null>(null);
+  const figureRef = useRef<HTMLElement>(null);
+  const controlsRef = useRef<LineChartControls>(null);
+
+  // The button disappears once the view is reset, so keep keyboard focus on the chart.
+  const resetView = () => {
+    controlsRef.current?.resetView();
+    figureRef.current?.focus();
+  };
 
   // Changing the range marks the chart as loading (keeping the previous data on screen); the
   // effect below then fetches the new range.
@@ -96,6 +114,8 @@ export function TimeSeriesChart({
 
   return (
     <figure
+      ref={figureRef}
+      tabIndex={-1}
       aria-labelledby={headingId}
       aria-describedby={summaryId}
       aria-busy={load.kind === "loading"}
@@ -121,12 +141,19 @@ export function TimeSeriesChart({
         </div>
         {note ? <p className="text-[11px] leading-4 text-status-delayed">{note}</p> : null}
         {data ? (
-          <RangeSelector
-            options={data.options}
-            active={data.range}
-            busy={load.kind === "loading"}
-            onSelect={selectRange}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <RangeSelector
+              options={data.options}
+              active={data.range}
+              busy={load.kind === "loading"}
+              onSelect={selectRange}
+            />
+            {span?.zoomed ? (
+              <Button variant="segment" onClick={resetView}>
+                Reset view
+              </Button>
+            ) : null}
+          </div>
         ) : null}
       </figcaption>
 
@@ -154,6 +181,8 @@ export function TimeSeriesChart({
             units={data.series.units}
             synthetic={data.series.synthetic}
             height={height}
+            onVisibleSpanChange={setSpan}
+            controls={controlsRef}
           />
         )}
         {load.kind === "loading" && data !== null ? (
@@ -169,7 +198,7 @@ export function TimeSeriesChart({
             : describe(title, data, points)}
       </p>
 
-      {data ? <ChartFooter data={data} points={points} /> : null}
+      {data ? <ChartFooter data={data} points={points} span={span} /> : null}
     </figure>
   );
 }
@@ -201,9 +230,11 @@ function describe(title: string, data: ChartHistory, points: readonly ChartPoint
 function ChartFooter({
   data,
   points,
+  span,
 }: {
   data: ChartHistory;
   points: ReturnType<typeof toChartPoints>;
+  span: VisibleSpan | null;
 }) {
   const convention = data.series.period_convention;
   const first = points[0]?.raw;
@@ -217,9 +248,19 @@ function ChartFooter({
     <footer className="space-y-0.5 border-t border-border px-3 py-1.5 text-[10px] leading-4 text-faint">
       {first && last ? (
         <p>
-          Showing {formatPeriod(convention, first.period_start, first.period_end)} –{" "}
-          {formatPeriod(convention, last.period_start, last.period_end)} · {points.length}{" "}
-          observations
+          {span?.zoomed ? (
+            <>
+              Viewing {formatPeriod(convention, span.first.period_start, span.first.period_end)} –{" "}
+              {formatPeriod(convention, span.last.period_start, span.last.period_end)} · {span.count}{" "}
+              of {span.total} observations
+            </>
+          ) : (
+            <>
+              Showing {formatPeriod(convention, first.period_start, first.period_end)} –{" "}
+              {formatPeriod(convention, last.period_start, last.period_end)} · {points.length}{" "}
+              observations
+            </>
+          )}
           {missing > 0 ? ` · ${missing} missing at source (gaps)` : ""}
           {data.truncated ? ` · limited to the first ${points.length} of ${data.total}` : ""}
           {data.earliest ? ` · stored since ${data.earliest}` : ""}

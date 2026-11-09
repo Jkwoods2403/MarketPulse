@@ -1,5 +1,8 @@
 import io
+import json
 import logging
+
+import pytest
 
 from marketpulse.core.config import Environment, Settings
 from marketpulse.core.logging import RedactingFilter, configure_logging
@@ -34,6 +37,29 @@ def test_configured_root_handler_redacts_any_logger() -> None:
     output = stream.getvalue()
     assert SECRET not in output
     assert "token=REDACTED" in output
+
+
+@pytest.mark.parametrize("env", [Environment.STAGING, Environment.PRODUCTION])
+def test_json_logs_identify_their_environment(env: Environment) -> None:
+    configure_logging(Settings(_env_file=None, marketpulse_env=env))  # type: ignore[call-arg]
+    handler = logging.getLogger().handlers[0]
+    stream = io.StringIO()
+    handler.setStream(stream)  # type: ignore[attr-defined]
+
+    logging.getLogger("some.other.library").warning("hello")
+
+    assert json.loads(stream.getvalue())["environment"] == env.value
+
+
+def test_text_logs_identify_their_environment() -> None:
+    configure_logging(Settings(_env_file=None, marketpulse_env=Environment.DEVELOPMENT))  # type: ignore[call-arg]
+    handler = logging.getLogger().handlers[0]
+    stream = io.StringIO()
+    handler.setStream(stream)  # type: ignore[attr-defined]
+
+    logging.getLogger("some.other.library").warning("hello")
+
+    assert "[development]" in stream.getvalue()
 
 
 def test_configure_logging_quiets_and_filters_http_libraries() -> None:

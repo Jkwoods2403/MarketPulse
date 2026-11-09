@@ -65,6 +65,12 @@ def test_environment_variables_override_defaults(monkeypatch: pytest.MonkeyPatch
     assert settings.postgres_port == 6543
 
 
+def test_staging_is_a_distinct_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARKETPULSE_ENV", "staging")
+
+    assert Settings(_env_file=None).marketpulse_env is Environment.STAGING
+
+
 def test_password_is_never_exposed_in_repr(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("POSTGRES_PASSWORD", "super-secret-value")
     settings = Settings(_env_file=None)

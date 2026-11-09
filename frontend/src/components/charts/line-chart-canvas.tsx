@@ -7,15 +7,28 @@ import {
   LineStyle,
   createChart,
   createTextWatermark,
+  type IChartApi,
+  type LogicalRange,
   type MouseEventParams,
   type Time,
 } from "lightweight-charts";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 
-import type { ChartPoint } from "@/lib/chart-data";
+import {
+  legendTopMargin,
+  visibleSpan,
+  type ChartPoint,
+  type VisibleSpan,
+} from "@/lib/chart-data";
 import { formatPeriod, formatValue } from "@/lib/format";
 
 type Hover = { point: ChartPoint; x: number; width: number } | null;
+
+export type LineChartControls = { resetView: () => void };
+
+// The library's default (0.5 px) cannot fit a long history into a narrow panel: fitContent would
+// silently leave the oldest observations out of view. This fits tens of thousands of points.
+const MIN_BAR_SPACING_PX = 0.005;
 
 function token(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(`--color-${name}`).trim();
@@ -44,6 +57,10 @@ function decimalsIn(points: readonly ChartPoint[]): number {
  * nothing is interpolated. The tooltip shows the exact published value string, while axis
  * labels may round. TradingView's attribution logo (a link to tradingview.com) is enabled, as
  * the Lightweight Charts license requires.
+ *
+ * The legend gives the latest value, so the price axis has no last-value tag, and the price
+ * scale keeps a band free at the top so the line never runs under the legend. The observations
+ * in view are reported through `onVisibleSpanChange` as the user zooms or pans.
  */
 export function LineChartCanvas({
   points,
@@ -51,15 +68,31 @@ export function LineChartCanvas({
   units,
   synthetic,
   height,
+  onVisibleSpanChange,
+  controls,
 }: {
   points: readonly ChartPoint[];
   convention: string;
   units: string;
   synthetic: boolean;
   height: number;
+  onVisibleSpanChange?: (span: VisibleSpan | null) => void;
+  controls?: Ref<LineChartControls>;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const onSpanRef = useRef(onVisibleSpanChange);
   const [hover, setHover] = useState<Hover>(null);
+
+  useEffect(() => {
+    onSpanRef.current = onVisibleSpanChange;
+  }, [onVisibleSpanChange]);
+
+  useImperativeHandle(
+    controls,
+    () => ({ resetView: () => chartRef.current?.timeScale().fitContent() }),
+    [],
+  );
 
   useEffect(() => {
     const container = containerRef.current;
@@ -83,8 +116,18 @@ export function LineChartCanvas({
         vertLines: { color: token("border") },
         horzLines: { color: token("border") },
       },
-      rightPriceScale: { borderColor: token("border-strong") },
-      timeScale: { borderColor: token("border-strong"), timeVisible: false },
+      rightPriceScale: {
+        borderColor: token("border-strong"),
+        scaleMargins: { top: legendTopMargin(height), bottom: 0.05 },
+      },
+      timeScale: {
+        borderColor: token("border-strong"),
+        timeVisible: false,
+        minBarSpacing: MIN_BAR_SPACING_PX,
+        // Keep the view on the data: without these, zooming out shrinks the line to a sliver.
+        fixLeftEdge: true,
+        fixRightEdge: true,
+      },
       crosshair: {
         mode: CrosshairMode.Normal,
         vertLine: { color: token("faint"), labelBackgroundColor: token("panel-raised") },
@@ -98,7 +141,7 @@ export function LineChartCanvas({
       lineWidth: 2,
       lineStyle: synthetic ? LineStyle.Dashed : LineStyle.Solid,
       priceLineVisible: false,
-      lastValueVisible: true,
+      lastValueVisible: false,
       crosshairMarkerRadius: 3,
     });
     series.setData(
@@ -112,6 +155,17 @@ export function LineChartCanvas({
         lines: [{ text: "SYNTHETIC · NOT MARKET DATA", color: "rgba(224, 163, 58, 0.22)", fontSize: 18 }],
       });
     }
+    chartRef.current = chart;
+
+    let reported = "";
+    const onVisibleRange = (range: LogicalRange | null) => {
+      const span = range ? visibleSpan(points, range.from, range.to) : null;
+      const key = span ? `${span.firstIndex}:${span.lastIndex}` : "";
+      if (key === reported) return; // panning fires per frame; report only real changes
+      reported = key;
+      onSpanRef.current?.(span);
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(onVisibleRange);
     chart.timeScale().fitContent();
 
     const byTime = new Map(points.map((p) => [p.time, p]));
@@ -128,9 +182,12 @@ export function LineChartCanvas({
 
     return () => {
       chart.unsubscribeCrosshairMove(onMove);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(onVisibleRange);
+      chartRef.current = null;
+      onSpanRef.current?.(null);
       chart.remove();
     };
-  }, [points, synthetic]);
+  }, [points, synthetic, height]);
 
   const shown = hover?.point ?? points.at(-1) ?? null;
   return (

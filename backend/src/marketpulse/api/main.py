@@ -52,6 +52,11 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        logger.info(
+            "API started: environment=%s data_mode=%s",
+            settings.marketpulse_env.value,
+            repository.data_mode,
+        )
         yield
         if engine is not None:
             engine.dispose()

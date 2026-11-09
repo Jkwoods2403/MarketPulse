@@ -138,7 +138,7 @@ export interface components {
          * Environment
          * @enum {string}
          */
-        Environment: "development" | "test" | "production";
+        Environment: "development" | "test" | "staging" | "production";
         /**
          * ErrorResponse
          * @description Body of a 404 or 503 answer. Unknown and not-permitted series get the same 404.

@@ -1,4 +1,5 @@
 import { getApiHealth } from "@/lib/api";
+import { environmentLabel } from "@/lib/environment";
 
 function formatUtc(date: Date): string {
   return `${date.toISOString().replace("T", " ").slice(0, 19)} UTC`;
@@ -33,7 +34,9 @@ export async function ApiStatus() {
       <dt className="text-muted">API version</dt>
       <dd className="text-fg">{data.version}</dd>
       <dt className="text-muted">Environment</dt>
-      <dd className="text-fg">{data.environment}</dd>
+      <dd className={environmentLabel(data.environment) ? "text-status-delayed" : "text-fg"}>
+        {data.environment === "staging" ? "staging (isolated, not production)" : data.environment}
+      </dd>
       <dt className="text-muted">Data mode</dt>
       <dd className={data.data_mode === "synthetic" ? "text-status-delayed" : "text-fg"}>
         {data.data_mode === "synthetic" ? "SYNTHETIC fixtures (not market data)" : "Database"}
@@ -68,6 +71,23 @@ export async function ApiStatusIndicator() {
   return (
     <span className="text-status-live" title={`Backend ${result.data.version}`}>
       ● API connected
+    </span>
+  );
+}
+
+/** Names a non-production deployment in the top bar. Must be rendered inside <Suspense>. */
+export async function EnvironmentBadge() {
+  const result = await getApiHealth();
+  if (result.state !== "ok") return null;
+  const label = environmentLabel(result.data.environment);
+  if (label === null) return null;
+  return (
+    <span
+      className="border border-status-delayed px-1.5 font-semibold text-status-delayed"
+      title={`${label} environment: this is not the production deployment`}
+    >
+      {label}
+      <span className="sr-only"> environment: this is not the production deployment.</span>
     </span>
   );
 }

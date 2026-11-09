@@ -6,15 +6,19 @@ company research, and quantitative analytics in a professional terminal-style in
 
 It is both a daily monitoring tool and a data engineering and quantitative research project.
 
-> **Status (2026-11-08):** the read-only data API (Milestone 2) and dashboard v1 (Milestone 3)
-> are implemented. They have been tested with synthetic development fixtures and isolated test
-> databases; the dashboard shows whatever the configured database holds.
+> **Status (2026-11-09):** the read-only data API (Milestone 2) and dashboard v1 (Milestone 3)
+> are implemented. Real-data activation has completed **Phase 6.1 in staging only**: nothing
+> from it has been deployed to production, and Phase 6.2 has not started. See the
+> [real-data activation log](#real-data-activation-log).
 >
-> - **FRED:** ingestion is complete: 12 rates, FX, and macro series with full revision history
->   (182,232 stored versions, verified against the live API).
+> - **FRED:** ingestion is built, and a backfill of 12 rates, FX, and macro series with full
+>   revision history (182,232 stored versions, verified against the live API) was run into the
+>   production database on 2026-11-01. Staging holds no FRED data.
 > - **EIA:** the connector (12 energy series, 9 of them permitted; first-seen snapshot
->   versioning) is built and tested. As last recorded here it had not yet been run against the
->   live API. **To confirm:** whether a live EIA ingestion has since been run.
+>   versioning) is built and tested. Live ingestion has been run in staging only (9 permitted
+>   series, 14,579 stored versions, last retrieved 2026-11-06). As last recorded, the production
+>   database holds no EIA data; Phase 6.1 made no production connection, so this was not
+>   re-checked.
 > - **Not available:** commodity spot prices (WTI, Brent, Henry Hub) are licensed for personal
 >   use only and are neither ingested nor displayed. ERCOT data is on hold pending ERCOT's
 >   licensing answer (ADR-0014).
@@ -83,9 +87,14 @@ Next.js application. The server calls the API; the browser never does (ADR-0004)
   values, with methodology and comparison periods.
 - **Spot prices are shown as unavailable,** with the licensing reason.
 - **Charts** use TradingView Lightweight Charts with its attribution. Third-party notices are at
-  `/notices` and in [`frontend/THIRD_PARTY_NOTICES.md`](frontend/THIRD_PARTY_NOTICES.md).
+  `/notices` and in [`frontend/THIRD_PARTY_NOTICES.md`](frontend/THIRD_PARTY_NOTICES.md). While
+  a chart is zoomed or panned, its caption names the observations in view and a Reset view
+  button returns to the whole selected range.
 - **Accessibility is checked.** The interface is keyboard accessible, meets WCAG AA contrast,
   and gives each chart a text description. See [`frontend/README.md`](frontend/README.md).
+- **Non-production deployments are named.** With `MARKETPULSE_ENV=staging` the top bar of every
+  page shows a Staging badge, `/health` reports `staging`, and application log lines carry the
+  environment. Uvicorn's own server and access log lines do not.
 
 ### Synthetic development mode
 
@@ -97,7 +106,7 @@ cd frontend && pnpm dev                                # open http://localhost:3
 ```
 
 The safeguards:
-- The synthetic app refuses to start outside the development environment.
+- The synthetic app refuses to start outside the development environment (staging included).
 - Values are a deterministic walk around 100 for every series, regardless of units, so they
   cannot pass for real figures. They exist only in memory and are never written to a database.
 - Every response is marked `data_mode: "synthetic"`. The dashboard shows a banner, a
@@ -268,14 +277,85 @@ Backend tests run isolated ([`backend/tests/isolation.py`](backend/tests/isolati
   configured `POSTGRES_PORT`, and only to databases whose name ends in `_test`. Database tests use
   `<POSTGRES_DB>_test`, which is created and dropped for each session.
 
+## Real-data activation log
+
+Phase 6 is the operational track for showing real EIA and FRED data. Its phases are separate
+from the numbered milestones in the roadmap below.
+
+| Phase | Status | Scope |
+|---|---|---|
+| 6.0 Read-only staging preflight | Complete (2026-11-09) | Staging audit |
+| 6.1 Staging dashboard activation | Complete and signed off (2026-11-09) | **Staging only** |
+| 6.2 and later | **Not started**; requires separate approval | None |
+
+### Phase 6.1: what changed in staging
+
+- **Staging environment.** `MARKETPULSE_ENV=staging` is a distinct environment. It runs in
+  database mode only: the synthetic app refuses to start outside development, and production
+  frontend builds refuse synthetic responses.
+- **Database role separation.** The application no longer logs in to staging as a superuser.
+
+  | Role | Used for | Access |
+  |---|---|---|
+  | `mp_staging` | Administration only, over the container's local socket | Bootstrap superuser; no password, so no TCP login |
+  | `mp_staging_read` | API and read-only verification | `SELECT` only |
+  | `mp_staging_ingest` | Ingestion (no password set yet, so it cannot log in) | `SELECT`, plus `INSERT` and `UPDATE` on observations and operational tables; no deletes, catalog writes, or schema changes |
+
+  Roles differ per environment, so they are managed by staging-only scripts kept with the
+  staging deployment, not by Alembic. The grants were rehearsed on a throwaway restore of a
+  staging backup before being applied.
+- **Charts.** Captions follow the visible range; a Reset view button appears while zoomed; the
+  last-value tag was removed from the price axis because the legend gives the exact latest
+  value; the price scale keeps the line clear of the legend. A Max-range defect was also fixed:
+  long histories were silently cut short on narrow panels while the caption claimed all of them.
+
+### Phase 6.1: what was verified, in staging
+
+Verified on 2026-11-09 against the staging database, using the 9 permitted EIA series already
+stored there. No provider was contacted, and nothing was ingested.
+
+- 1,699 backend tests, on a disposable database; 51 frontend unit tests; lint, type, import,
+  and API-contract checks; a production build of the frontend.
+- `marketpulse verify`: exit 0. `marketpulse verify --replay`: exit 3, with 14,336 versions
+  verified, 243 unsupported, and 0 errors. Exit 3 is expected: those 243 versions match the
+  raw pages they came from, but later re-confirmations are not replayed.
+- Row, sequence, and schema fingerprints were identical before and after the role change.
+- All 14,579 observations served by the API matched the database. An independent recomputation
+  of the calculated metrics found 0 mismatches in 119 values.
+- A browser run covered every route and latest-value card, with no synthetic data, and no
+  console or network errors in normal use. Range buttons, hover, zoom, and Reset view were
+  exercised on three representative weekly and monthly charts, not on all 11. Restricted
+  spot-price series stayed unavailable, and ERCOT stayed absent.
+
+### Staging and production are separate
+
+| | Staging | Production |
+|---|---|---|
+| Phase 6.1 changes | Applied and verified | **Not deployed** |
+| Database | Isolated container and volume | Not connected to or modified during Phase 6.1 |
+| Role separation | Applied | Not applied; its role setup has not been reviewed |
+| EIA data | 9 permitted series, last retrieved 2026-11-06 | None, as last recorded (not re-checked) |
+| FRED data | None | Backfilled 2026-11-01, as last recorded (not re-checked) |
+
+### Known limitations
+
+- Staging verification is not a production deployment, and passing it says nothing about the
+  production database.
+- In staging, the macro dashboard has only been exercised with no data (elsewhere, only with
+  synthetic fixtures and test data), so its charts and its daily, quarterly, and basis-point
+  metrics are unvalidated on real values.
+- The Stale label has not been seen on real data: as of 2026-11-09, no series stored in staging
+  was stale.
+- Staging's EIA data ages until it is next refreshed; no scheduler exists.
+
 ## Roadmap
 
 | # | Milestone | Status |
 |---|---|---|
 | 0 | Foundation: repo structure, tooling, CI | ✅ |
-| 1 | Data core and the FRED and EIA connectors | In progress: FRED ✅, EIA connector built (not yet run live) |
+| 1 | Data core and the FRED and EIA connectors | In progress: FRED ✅, EIA connector built (run live in staging only) |
 | 2 | API v1: series, observations, freshness | ✅ Plus calculated metrics (`/metrics`) and a committed OpenAPI contract |
-| 3 | Dashboard v1 | ✅ Overview, Natural Gas, Crude & Petroleum, Macroeconomics; tested with synthetic fixtures and test databases |
+| 3 | Dashboard v1 | ✅ Overview, Natural Gas, Crude & Petroleum, Macroeconomics; tested with synthetic fixtures and test databases; verified on real EIA data in staging (Phase 6.1), not yet deployed to production |
 | 4 | ERCOT and weather | ERCOT design proposed (ADR-0012 to ADR-0014); ERCOT source catalogued with ingestion blocked in code until ERCOT answers the licensing inquiry |
 | 5 | Equities and company intelligence | |
 | 6 | Events calendar and watchlists | |
