@@ -74,6 +74,12 @@ uv run marketpulse ingest fred --series real_gdp --full   # force a full re-fetc
 
 Exit codes: 0 all series succeeded, 1 any series failed, 2 none failed but some were partial.
 
+**Allowlist:** only the 12 series in `ALLOWED_FRED_SERIES` (`backend/src/marketpulse/ingestion/fred.py`)
+can be ingested. Both the catalog code and the FRED series ID must match, and the series may carry
+no license override. The list is a code constant: the catalog, the environment, and the command
+line cannot widen it. Adding a series is a reviewed code change, made after checking that it
+carries no third-party copyright notice.
+
 Per series, in its own ingestion run (`ops.ingestion_runs`, job `fred.observations`):
 
 1. The catalog entry and `ref.series` row must match (run `marketpulse catalog sync` first).
