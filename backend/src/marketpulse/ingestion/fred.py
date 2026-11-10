@@ -18,12 +18,21 @@ Per series, inside one tracked ingestion run (`ops.ingestion_runs`, job "fred.ob
 Series are independent: a failure is recorded on that series' run and the job moves on.
 Configuration problems (no API key, catalog not synced, unknown series code) stop the job before
 any network request.
+
+Allowlist (ADR-0008): only the series in ALLOWED_FRED_SERIES are ever requested. FRED carries
+series owned by third parties, and its license terms are per series, so each one was reviewed
+before being listed here. The list is a code constant, deliberately: it is not read from the
+environment, settings, the command line, or the catalog, so a catalog passed at runtime cannot
+widen it. Both the catalog code and the FRED series ID must match, and a series may carry no
+license override. Anything else stops the job before any network request or ingestion run.
 """
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
+from types import MappingProxyType
+from typing import Final
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -47,9 +56,32 @@ MODE_UNKNOWN = "unknown"  # the mode is chosen inside the run; a run that fails 
 
 ClientFactory = Callable[[ResponseHook], FredClient]
 
+# Catalog code -> FRED series ID. Adding a series is a reviewed code change, made after checking
+# that the series carries no third-party copyright notice (docs/data-sources.md).
+ALLOWED_FRED_SERIES: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "ust_3m": "DGS3MO",
+        "ust_2y": "DGS2",
+        "ust_10y": "DGS10",
+        "ust_30y": "DGS30",
+        "ust_10y_2y_spread": "T10Y2Y",
+        "fed_funds_effective": "DFF",
+        "usd_broad_index": "DTWEXBGS",
+        "cpi_all_items": "CPIAUCSL",
+        "nonfarm_payrolls": "PAYEMS",
+        "unemployment_rate": "UNRATE",
+        "industrial_production": "INDPRO",
+        "real_gdp": "GDPC1",
+    }
+)
+
 
 class FredIngestionConfigError(RuntimeError):
     """The job cannot start (bad series selection, catalog not synced, missing credentials)."""
+
+
+class FredSeriesNotAllowedError(FredIngestionConfigError):
+    """A series is not on the allowlist, or does not match its allowlisted identity."""
 
 
 class CatalogDriftError(RuntimeError):
@@ -133,16 +165,40 @@ def default_client_factory(settings: Settings) -> ClientFactory:
     return factory
 
 
+def require_series_allowed(spec: SeriesSpec) -> None:
+    """Raise FredSeriesNotAllowedError unless `spec` is an allowlisted series, exactly."""
+    allowed_id = ALLOWED_FRED_SERIES.get(spec.code)
+    if allowed_id is None:
+        raise FredSeriesNotAllowedError(
+            f"FRED series {spec.code!r} is not on the allowlist; adding one is a reviewed code "
+            "change (ALLOWED_FRED_SERIES)"
+        )
+    if spec.source_series_id != allowed_id:
+        raise FredSeriesNotAllowedError(
+            f"FRED series {spec.code!r} maps to {spec.source_series_id!r}, but the allowlist "
+            f"permits only {allowed_id!r}"
+        )
+    if spec.license_override is not None:
+        raise FredSeriesNotAllowedError(
+            f"FRED series {spec.code!r} carries a license override "
+            f"({spec.license_override.value}); it is not ingested"
+        )
+
+
 def select_series(catalog: Catalog, codes: Sequence[str] | None) -> list[SeriesSpec]:
     available = {spec.code: spec for spec in catalog.series_for(SOURCE_CODE)}
-    if not codes:
-        return list(available.values())
-    unknown = sorted(set(codes) - set(available))
-    if unknown:
-        raise FredIngestionConfigError(
-            f"unknown FRED series code(s) {unknown}; available: {sorted(available)}"
-        )
-    return [available[code] for code in dict.fromkeys(codes)]
+    if codes:
+        unknown = sorted(set(codes) - set(available))
+        if unknown:
+            raise FredIngestionConfigError(
+                f"unknown FRED series code(s) {unknown}; available: {sorted(available)}"
+            )
+        specs = [available[code] for code in dict.fromkeys(codes)]
+    else:
+        specs = list(available.values())
+    for spec in specs:
+        require_series_allowed(spec)
+    return specs
 
 
 def _resolve_database_rows(
@@ -255,6 +311,7 @@ def _ingest_series(
     series_id: int,
     full: bool,
 ) -> SeriesOutcome:
+    require_series_allowed(spec)  # defense in depth: before the run row or any request exists
     fred_id = spec.source_series_id
     tracker = IngestionRunTracker(
         session_factory,
