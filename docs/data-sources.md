@@ -10,7 +10,7 @@ The authoritative list of tracked series is the version-controlled catalog in
 
 | Source | Status | License (catalog) | Access requirement (catalog) |
 |---|---|---|---|
-| [FRED](#fred-federal-reserve-bank-of-st-louis) | **Ingested** (12 series, full version history) | `attribution_required` | `registration_required` (free API key) |
+| [FRED](#fred-federal-reserve-bank-of-st-louis) | **New ingestion blocked** pending the Bank's prior written consent to database storage (2026-11-10). Historical data backfilled into production on 2026-11-01 is flagged for licensing review | `attribution_required` | `registration_required` (free API key) |
 | [EIA](#eia-us-energy-information-administration) | Connector built (12 series, first-seen snapshots); run against the live API in staging only (9 permitted series) | `public_domain`; 3 series `personal_use_only` | `registration_required` (free API key) |
 | [ERCOT](#ercot-electric-reliability-council-of-texas) | Source catalogued, no series; **ingestion blocked** pending ERCOT licensing inquiry SS0007218 | `no_redistribution` (conservative) | `subscription_required` |
 
@@ -22,21 +22,90 @@ what may be done with it.
 
 ## FRED (Federal Reserve Bank of St. Louis)
 
-*Verified 2026-11-01 against the FRED API documentation, the FRED legal page, every tracked
-series' page, and the live API.*
+*API facts and series were verified 2026-11-01 against the FRED API documentation, every tracked
+series' page, and the live API. The terms were re-reviewed on 2026-11-10 (below). That review
+found restrictions the 2026-11-01 record did not include.*
+
+> **Status (2026-11-10): new FRED ingestion is BLOCKED** until the Federal Reserve Bank of
+> St. Louis gives prior written consent to store FRED content in a database. This applies to
+> staging and production, including the planned Phase 6.2 Stage D full-vintage backfill into
+> staging. Until consent is recorded and a separate approval is given, do not run
+> `marketpulse ingest fred`, request a FRED API key, or call the FRED API.
+>
+> - **Historical data already in production:** the 12 series backfilled into the production
+>   database on 2026-11-01 ([below](#tracked-series-and-backfill-results)) are flagged for
+>   licensing review. They are kept unchanged for now. Any retention, deletion or archiving
+>   decision requires its own reviewed and approved plan.
+> - **New ingestion:** blocked in every environment. Staging holds no FRED data.
+> - **Decision record:** the owner's Stage D decision is recorded in
+>   `STAGE_D_DECISION_FRED_BLOCKED.md`, in the Phase 6.2 Stage D evidence kept outside this
+>   repository with the other staging operations records. A written-consent request covering
+>   storage, retention, dashboard display, derived metrics and portfolio demonstration has been
+>   drafted for the owner to send.
 
 ### Terms and attribution
 
-- **Terms:** <https://fred.stlouisfed.org/legal/>. FRED asks users to cite the source of the
-  data, note that it was accessed via FRED, and keep any copyright notices shown with the data.
-  Series with a copyright notice are owned by third parties and need the owner's permission for
-  anything beyond personal use.
-- **None of the 12 tracked series carries a third-party copyright notice** (checked in each
-  series' notes; the S&P 500 series was used as a control and does carry one).
-- **Catalog license:** `attribution_required`.
-- **Attribution text:** "Source: original data producer, retrieved from FRED, Federal Reserve
-  Bank of St. Louis". Each series also records its original producer (`original_source`), e.g.
-  U.S. Bureau of Labor Statistics for CPI.
+*Reviewed 2026-11-10 against the [FRED legal page](https://fred.stlouisfed.org/legal/) (FRED
+Services Terms of Use) and the
+[Additional Terms of Use for the FRED® API](https://fred.stlouisfed.org/docs/api/terms_of_use.html).
+Both pages were read in full. Neither shows an effective or "last updated" date, so it cannot be
+determined whether the clauses below were present on 2026-11-01. The terms may change without
+notice, and continued use counts as acceptance. This is a project record, not legal advice.*
+
+**Database storage requires the Bank's prior written consent.** The FRED Services Terms list what
+users "may not, without the Bank's prior written consent" do:
+
+- **Legal clause (p):** "Store, cache, or archive any portion of the FRED® Services or FRED®
+  Content;" ... "incorporate any FRED® Content in any database, compilation, archive, cache, or
+  other medium."
+- **API clause (l):** do not "Use the FRED® API in connection with storing, caching, or archiving
+  any portion of the FRED® Services or FRED® Content" ... "or incorporating any FRED® Content in
+  any database, compilation, archive, cache, or other medium."
+- **General license:** FRED content may be downloaded or printed "solely for your personal,
+  non-commercial use", with notices kept intact. "Any other use of the FRED® Content is strictly
+  prohibited." The Property Rights section adds that FRED content may not be "incorporated in any
+  other database or compilation ... without the Bank's prior written permission."
+- **No personal-use exception for database storage** was found. Market Pulse stores observations,
+  revisions and raw API responses in PostgreSQL and under `data/raw/fred/`, so its FRED ingestion
+  falls under clauses (p) and (l).
+
+**Machine learning (API clause (k)).** The API terms prohibit use in developing or training "any
+software program or system or machine learning". FRED data must not be used to develop or train
+machine-learning models, including in the Analytics Lab, unless the Bank's written clarification
+establishes that the proposed use is permitted.
+
+**Required API attribution notice.** Any product that uses the FRED API must prominently display
+this exact notice:
+
+> This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of
+> St. Louis.
+
+Market Pulse does not display it yet. It must be added before any future permitted display of
+FRED data, alongside the per-value attribution below.
+
+**Other terms:**
+
+- **Third-party copyright:** series with a copyright notice in their notes are owned by third
+  parties and need the owner's permission for anything beyond personal use. **None of the 12
+  tracked series carries a third-party copyright notice** (checked in each series' notes on
+  2026-11-01; the S&P 500 series was used as a control and does carry one). The "Additional Terms
+  of Use for Certain Data Series" cover only Visa SMI, which is not tracked.
+- **Bulk downloading:** API clause (m) prohibits "wholesale downloading".
+- **Endorsement and names:** clauses (f) and (i) prohibit implying the Bank's endorsement and
+  using FRED names in hostnames.
+- **Termination:** if access ends, all copies of FRED content must be destroyed.
+- **Catalog license:** `attribution_required`. The license value does not encode the
+  storage-consent requirement. That requirement is enforced by this block and by the owner's
+  decision, not by the catalog.
+- **Per-value attribution text:** "Source: original data producer, retrieved from FRED, Federal
+  Reserve Bank of St. Louis". Each series also records its original producer
+  (`original_source`), e.g. U.S. Bureau of Labor Statistics for CPI.
+
+**Safeguards kept in place.** The licensing block does not loosen any existing control. The
+application-level series allowlist ([below](#how-market-pulse-ingests-fred)) and the read-only
+future-date checks used before any FRED run stay in force and must not be weakened or bypassed.
+The future-date checks fail if any FRED `period_start` is after today in `America/Chicago` or any
+`vintage_start` is after the database's `now()`.
 
 ### API facts Market Pulse relies on
 
@@ -64,6 +133,10 @@ self-checked against this rule. This was discovered when the first live backfill
 incident…" and "Fix FRED window planning…", and `backend/tests/test_fred_window_limit.py`.
 
 ### How Market Pulse ingests FRED
+
+> **Blocked (2026-11-10):** the commands below describe the connector, which still exists. Do
+> not run them against any database until written consent is recorded and a separate approval
+> is given ([status](#fred-federal-reserve-bank-of-st-louis)).
 
 ```bash
 cd backend
@@ -128,8 +201,10 @@ Series are independent: a failure is recorded on that series' run and the job co
 
 ### Tracked series and backfill results
 
-Backfilled 2026-11-01 (runs 2 and 7–17). "Versions" counts every stored real-time version;
-"current" is one per period.
+Backfilled into the production database on 2026-11-01 (runs 2 and 7–17), before the
+2026-11-10 terms review. These are historical figures as recorded on that date and have not been
+re-checked. This data is flagged for licensing review and stays unchanged until a separate plan is
+approved. "Versions" counts every stored real-time version; "current" is one per period.
 
 | Code | FRED ID | Freq. | Periods | Versions | Current | First vintage |
 |---|---|---|---|---|---|---|
