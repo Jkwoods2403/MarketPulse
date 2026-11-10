@@ -98,6 +98,24 @@ def test_the_environment_cannot_widen_the_allowlist(monkeypatch: pytest.MonkeyPa
         select_series(with_unlisted_series(), None)
 
 
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["ingest", "fred", "--series", "sp500"],
+        ["ingest", "fred", "--series", "ust_10y", "sp500"],
+        ["ingest", "fred", "--series", "sp500", "--full"],
+    ],
+)
+def test_cli_arguments_cannot_request_an_unlisted_series(
+    args: list[str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(fred_job, "load_catalog", with_unlisted_series)
+    monkeypatch.setenv("FRED_API_KEY", "synthetic-test-key")
+
+    assert main(args) == 1
+    assert "not on the allowlist" in capsys.readouterr().out
+
+
 def test_the_cli_exits_1_when_a_catalog_series_is_not_allowed(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
