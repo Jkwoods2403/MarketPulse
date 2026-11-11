@@ -2,11 +2,18 @@
 
 These tests use a dedicated `<POSTGRES_DB>_test` database, recreated for each test session.
 tests/isolation.py has already renamed POSTGRES_DB to that name. It refuses any connection to a
-host that is not local, to a port other than POSTGRES_PORT, or to a database whose name does
-not end in `_test` (except the `postgres` maintenance database, used here only to create and
-drop the test database).
-If PostgreSQL is not reachable they are skipped, unless MARKETPULSE_REQUIRE_DB=1 (set in CI),
-in which case they fail, so database tests can never be skipped silently in CI.
+host that is not local, to a port other than POSTGRES_PORT, to ports 5432 and 5433 always, or to
+a database whose name does not end in `_test` (except the `postgres` maintenance database, used
+here only to create and drop the test database).
+They run only in a session that opted in to a disposable server (MARKETPULSE_TEST_DB=disposable,
+MARKETPULSE_TEST_DB_TOKEN, and all five POSTGRES_* variables set explicitly). Without the opt-in,
+or if the server is not reachable, they are skipped without connecting, unless
+MARKETPULSE_REQUIRE_DB=1 (set in CI), in which case they fail, so database tests can never be
+skipped silently in CI.
+Before anything is dropped or created, the maintenance connection verifies that the server holds
+this session's marker database (`mp_disposable_<token>`); until it has, every other connection is
+refused. A server without the marker is a hard failure, never a skip: the session was pointed at
+the wrong server. The marker is checked again right before the teardown drop.
 """
 
 import os
@@ -14,7 +21,6 @@ from collections.abc import Iterator
 
 import psycopg
 import pytest
-from psycopg import sql
 from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -22,7 +28,12 @@ from isolation import (
     check_database_host,
     check_database_name,
     check_database_port,
+    database_disabled_reason,
+    database_tests_enabled,
+    drop_test_database,
     maintenance_connection,
+    recreate_test_database,
+    revoke_server_verification,
 )
 from marketpulse.core.config import Settings
 from marketpulse.db import migrations
@@ -57,6 +68,17 @@ def db_settings() -> Settings:
 @pytest.fixture(scope="session")
 def test_db_name(db_settings: Settings) -> Iterator[str]:
     """Create a fresh, empty test database for the session; drop it afterwards."""
+    if not database_tests_enabled():  # decided before any connection is attempted
+        message = (
+            f"database tests need a disposable server ({database_disabled_reason()}). Set "
+            "MARKETPULSE_TEST_DB=disposable, MARKETPULSE_TEST_DB_TOKEN (the token the server was "
+            "created with, as POSTGRES_DB=mp_disposable_<token>) and "
+            "POSTGRES_HOST/PORT/USER/PASSWORD/DB explicitly; "
+            "ports 5432 (production) and 5433 (staging) are always refused"
+        )
+        if os.environ.get("MARKETPULSE_REQUIRE_DB") == "1":
+            pytest.fail(message)
+        pytest.skip(message)
     name = db_settings.postgres_db  # already `<POSTGRES_DB>_test` (tests/isolation.py)
     check_database_host(db_settings.postgres_host)  # fail fast on a remote server
     check_database_port(db_settings.postgres_port)  # ... or an unexpected port
@@ -66,20 +88,20 @@ def test_db_name(db_settings: Settings) -> Iterator[str]:
     except psycopg.OperationalError as exc:
         if os.environ.get("MARKETPULSE_REQUIRE_DB") == "1":
             pytest.fail(f"PostgreSQL required but unreachable: {exc}")
-        pytest.skip("PostgreSQL not reachable; start it with `docker compose up -d --wait`")
+        pytest.skip("the disposable PostgreSQL server is not reachable (see README, Checks)")
 
     with admin:
-        admin.execute(
-            sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name))
-        )
-        admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+        # Verifies the server's marker first: on a server without it nothing else runs, and
+        # the error fails the session. Opens the connection gate only after success.
+        recreate_test_database(admin, name)
     try:
         yield name
     finally:
-        with _admin_connect(db_settings) as admin:
-            admin.execute(
-                sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name))
-            )
+        try:
+            with _admin_connect(db_settings) as admin:
+                drop_test_database(admin, name)  # verifies again, then drops; closes the gate
+        finally:
+            revoke_server_verification()  # also when the maintenance connection fails
 
 
 @pytest.fixture(scope="session")

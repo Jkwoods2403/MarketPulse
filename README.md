@@ -264,11 +264,11 @@ the full list of checks, and limitations are in [`docs/verification.md`](docs/ve
 ### Checks
 
 ```bash
-# backend/  (start PostgreSQL first; database tests are skipped if it is unreachable)
+# backend/
 uv run ruff check . && uv run ruff format --check .
 uv run mypy
 uv run lint-imports
-uv run pytest                     # MARKETPULSE_REQUIRE_DB=1 makes database tests mandatory
+uv run pytest                     # database tests are skipped: see "Database tests" below
 
 # frontend/
 pnpm lint && pnpm typecheck && pnpm test && pnpm build
@@ -285,11 +285,67 @@ cd frontend && pnpm api:types
 ```
 
 Backend tests run isolated ([`backend/tests/isolation.py`](backend/tests/isolation.py)):
-- they never read provider API keys or the repository `data/` directory;
+- they never read the repository `.env` (not even for database settings), provider API keys, or
+  the repository `data/` directory;
 - they can reach only loopback network addresses;
-- they connect only to a local PostgreSQL server (`localhost`, loopback, or Unix socket) on the
-  configured `POSTGRES_PORT`, and only to databases whose name ends in `_test`. Database tests use
-  `<POSTGRES_DB>_test`, which is created and dropped for each session.
+- they connect to PostgreSQL only in a session that explicitly opted in to a **disposable**
+  server, only on that server's port, and only to databases whose name ends in `_test`
+  (`<POSTGRES_DB>_test`, created and dropped for each session);
+- ports **5432 (production) and 5433 (staging) are always refused**, before any connection.
+  Automated tests never use the production or staging database;
+- the server must also prove it is the disposable server created for this session (below), and
+  connections use SCRAM authentication only.
+
+#### Database tests
+
+Without the opt-in, database tests are skipped without connecting (or fail, under
+`MARKETPULSE_REQUIRE_DB=1`, as in CI). To run them, start a throwaway server on a free port that
+is not 5432 or 5433, with synthetic credentials, and set every value explicitly in the same
+command. Nothing is taken from `.env`.
+
+A local host, an approved port, and a `_test` database name say only *where* a connection goes,
+not *what* listens there: a tunnel or port forward to a real server would pass all three. So each
+throwaway server gets a random **token** when it is created: its initial database is
+`mp_disposable_<token>`, and the test session receives the same token as
+`MARKETPULSE_TEST_DB_TOKEN` (12 to 40 lowercase letters or digits). Before dropping or creating
+anything, the database fixtures check that the server has that marker database, and they check
+again right before the final drop; until the check has passed, every other connection is refused.
+A server without the marker fails the session. This ties the session to the server it was
+created with; it does not stop anyone from deliberately creating the marker on a real server.
+Connections also require SCRAM authentication (`PGREQUIREAUTH=scram-sha-256`), which the
+`postgres` image uses by default, so a wrong server never receives the password in a reusable
+form.
+
+```bash
+# a new token for a new throwaway server (remove it afterwards with `docker rm -fv mp-test-pg`)
+TOKEN=$(python -c "import secrets; print(secrets.token_hex(12))")
+docker run -d --name mp-test-pg -e POSTGRES_USER=mp_test -e POSTGRES_PASSWORD=synthetic-only \
+  -e POSTGRES_DB=mp_disposable_$TOKEN -p 127.0.0.1:55432:5432 postgres:17-alpine
+
+# backend/ (same shell, so $TOKEN is still set)
+MARKETPULSE_TEST_DB=disposable MARKETPULSE_TEST_DB_TOKEN=$TOKEN \
+  POSTGRES_HOST=127.0.0.1 POSTGRES_PORT=55432 \
+  POSTGRES_USER=mp_test POSTGRES_PASSWORD=synthetic-only POSTGRES_DB=marketpulse \
+  MARKETPULSE_REQUIRE_DB=1 uv run pytest -W error
+```
+
+On Windows PowerShell:
+
+```powershell
+$token = python -c "import secrets; print(secrets.token_hex(12))"
+docker run -d --name mp-test-pg -e POSTGRES_USER=mp_test -e POSTGRES_PASSWORD=synthetic-only `
+  -e POSTGRES_DB=mp_disposable_$token -p 127.0.0.1:55432:5432 postgres:17-alpine
+
+# backend/
+$env:MARKETPULSE_TEST_DB = "disposable"; $env:MARKETPULSE_TEST_DB_TOKEN = $token
+$env:POSTGRES_HOST = "127.0.0.1"; $env:POSTGRES_PORT = "55432"; $env:POSTGRES_USER = "mp_test"
+$env:POSTGRES_PASSWORD = "synthetic-only"; $env:POSTGRES_DB = "marketpulse"
+$env:MARKETPULSE_REQUIRE_DB = "1"; uv run pytest -W error
+```
+
+A server created before the token was introduced has no marker and is refused: recreate it.
+CI does the same with its own service container on port 55432, using a token derived from the
+run (`ci<run id>x<run attempt>`).
 
 ## Real-data activation log
 
