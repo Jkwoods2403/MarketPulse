@@ -25,11 +25,15 @@ jobs:
         env:
           POSTGRES_USER: marketpulse
           POSTGRES_PASSWORD: ci-only-password
-          POSTGRES_DB: marketpulse
+          # The disposable-server marker: mp_disposable_<token>, with the token below. Database
+          # tests verify it exists before they drop or create anything.
+          POSTGRES_DB: "mp_disposable_ci${{ github.run_id }}x${{ github.run_attempt }}"
         ports:
-          - 5432:5432
+          # A disposable port: tests refuse 5432 (production) and 5433 (staging) in code.
+          - 55432:5432
+        # pg_isready only checks that the server accepts connections; `postgres` always exists.
         options: >-
-          --health-cmd "pg_isready -U marketpulse -d marketpulse"
+          --health-cmd "pg_isready -U marketpulse -d postgres"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       # CI-only credentials for the throwaway service container above (not secrets).
@@ -37,10 +41,20 @@ jobs:
       POSTGRES_PASSWORD: ci-only-password
       POSTGRES_DB: marketpulse
       POSTGRES_HOST: localhost
-      POSTGRES_PORT: "5432"
+      POSTGRES_PORT: "55432"
+      # The explicit opt-in: this service is a disposable test server.
+      MARKETPULSE_TEST_DB: disposable
+      # This run's disposable-server token (the service's POSTGRES_DB is mp_disposable_<token>).
+      # Unique per run and attempt; not a secret.
+      MARKETPULSE_TEST_DB_TOKEN: "ci${{ github.run_id }}x${{ github.run_attempt }}"
       # Database tests must run in CI; never skip them silently.
       MARKETPULSE_REQUIRE_DB: "1"
     steps:
+      # The token and password are synthetic and CI-only, but are kept out of later log output.
+      - name: Mask synthetic CI values in logs
+        run: |
+          echo "::add-mask::${MARKETPULSE_TEST_DB_TOKEN}"
+          echo "::add-mask::${POSTGRES_PASSWORD}"
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v6
         with:
@@ -58,6 +72,49 @@ jobs:
         run: uv run lint-imports
       - name: Tests
         run: uv run pytest -W error
+      # Negative check on the same disposable service: a session with the WRONG token must fail
+      # hard at the marker check, before any DROP or CREATE. MARKETPULSE_REQUIRE_DB is unset here,
+      # so only that check can turn the run into a failure instead of a skip. A sentinel test
+      # database (same OID, row intact afterwards) proves nothing was dropped or recreated.
+      - name: Wrong disposable-server token fails hard before any DROP or CREATE
+        if: ${{ !cancelled() }}
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          # psql inside the service container (local socket: no password involved)
+          sql() { docker exec "$PG_CONTAINER" psql -U "$POSTGRES_USER" -d "$1" -v ON_ERROR_STOP=1 -qtAc "$2"; }
+          wrong="nx${MARKETPULSE_TEST_DB_TOKEN}"  # well-formed, but never this server's token
+          echo "::add-mask::${wrong}"
+          sql postgres "DROP DATABASE IF EXISTS negcheck_test"
+          sql postgres "CREATE DATABASE negcheck_test"
+          sql negcheck_test "CREATE TABLE sentinel (v int); INSERT INTO sentinel VALUES (42)"
+          oid_before="$(sql postgres "SELECT oid FROM pg_database WHERE datname = 'negcheck_test'")"
+          set +e
+          MARKETPULSE_TEST_DB_TOKEN="$wrong" POSTGRES_DB=negcheck MARKETPULSE_REQUIRE_DB= \
+            uv run pytest -q -p no:cacheprovider tests/db/test_constraints.py > negcheck.log 2>&1
+          status=$?
+          set -e
+          { grep -E "not this session's disposable server|[0-9]+ (passed|failed|skipped|errors?)" \
+              negcheck.log || true; } | sort -u | head -n 5
+          echo "pytest exit status: ${status}"
+          [ "$status" -ne 0 ] || fail "the wrong-token session did not fail"
+          grep -q "not this session's disposable server" negcheck.log \
+            || fail "the failure was not the marker check"
+          grep -Eq "[0-9]+ errors?" negcheck.log || fail "the session did not error"
+          if grep -Eq "[0-9]+ (passed|skipped)" negcheck.log; then
+            fail "tests passed or were skipped instead of failing hard"
+          fi
+          if grep -qF "$wrong" negcheck.log; then fail "the token appeared in the output"; fi
+          if grep -qF "$POSTGRES_PASSWORD" negcheck.log; then
+            fail "the password appeared in the output"
+          fi
+          oid_after="$(sql postgres "SELECT oid FROM pg_database WHERE datname = 'negcheck_test'")"
+          [ "$oid_after" = "$oid_before" ] || fail "negcheck_test was dropped or recreated"
+          [ "$(sql negcheck_test "SELECT v FROM sentinel")" = "42" ] || fail "sentinel row changed"
+          sql postgres "DROP DATABASE negcheck_test"
+          echo "wrong token: hard failure at the marker check; no DROP or CREATE ran"
 
   frontend:
     name: Frontend (lint, types, tests, generated files, build)

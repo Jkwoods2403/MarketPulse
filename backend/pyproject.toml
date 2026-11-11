@@ -77,7 +77,7 @@ testpaths = ["tests"]
 pythonpath = ["tests"]  # shared test helpers (e.g. fred_mock) importable from subdirectories
 addopts = "-ra --strict-markers"
 markers = [
-    "db: needs PostgreSQL (skipped if unreachable, required in CI via MARKETPULSE_REQUIRE_DB=1)",
+    "db: needs a disposable PostgreSQL server (MARKETPULSE_TEST_DB=disposable plus explicit POSTGRES_*; skipped otherwise, required in CI via MARKETPULSE_REQUIRE_DB=1)",
 ]
 
 # --- import-linter: enforced module boundaries (ADR-0002) ---------------------------
