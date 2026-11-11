@@ -51,7 +51,10 @@ jobs:
       MARKETPULSE_REQUIRE_DB: "1"
     steps:
       # The token and password are synthetic and CI-only, but are kept out of later log output.
+      # Runs before checkout, so not in the job's default `backend` directory (it does not exist
+      # yet): the workspace root, which the runner creates before any step.
       - name: Mask synthetic CI values in logs
+        working-directory: .
         run: |
           echo "::add-mask::${MARKETPULSE_TEST_DB_TOKEN}"
           echo "::add-mask::${POSTGRES_PASSWORD}"
