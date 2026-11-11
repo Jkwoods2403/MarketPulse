@@ -3,7 +3,7 @@ import type { FreshnessStatus } from "@/lib/api";
 
 /**
  * Data status labels (CLAUDE.md §3), as computed by the API. No value in Market Pulse is live:
- * EIA and FRED publish with a delay, so the strongest status is "fresh" (the latest period is
+ * sources publish with a delay, so the strongest status is "fresh" (the latest period is
  * within the series' own expected release interval).
  */
 const LABELS: Record<FreshnessStatus, string> = {

@@ -9,7 +9,7 @@ uv run marketpulse serve --reload    # API at http://127.0.0.1:8000  (docs at /d
 uv run marketpulse db upgrade        # apply database migrations
 uv run marketpulse catalog validate  # check the series catalog (no database needed)
 uv run marketpulse catalog sync      # apply the catalog to ref.sources / ref.series (--dry-run)
-uv run marketpulse ingest fred       # ingest FRED series (--series CODE ..., --full)
+uv run marketpulse ingest eia        # ingest the permitted EIA series (--series CODE ..., --full)
 uv run marketpulse probe eia         # read-only live EIA check, stores nothing (--series CODE ...)
 uv run marketpulse verify            # read-only integrity checks (--series CODE ..., --replay)
 

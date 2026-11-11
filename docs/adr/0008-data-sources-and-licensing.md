@@ -1,6 +1,7 @@
 # ADR-0008: Data sources and licensing
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by [ADR-0015](0015-direct-source-data-only.md) (FRED retired as a
+  data provider; data only directly from the publishing organization)
 - **Date:** 2026-10-31
 
 ## Context

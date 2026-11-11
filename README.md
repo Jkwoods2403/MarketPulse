@@ -6,32 +6,35 @@ company research, and quantitative analytics in a professional terminal-style in
 
 It is both a daily monitoring tool and a data engineering and quantitative research project.
 
-> **Status (2026-11-09):** the read-only data API (Milestone 2) and dashboard v1 (Milestone 3)
+> **Status (2026-11-11):** the read-only data API (Milestone 2) and dashboard v1 (Milestone 3)
 > are implemented. Real-data activation has completed **Phase 6.1 in staging only**: nothing
-> from it has been deployed to production, and Phase 6.2 has not started. See the
+> from it has been deployed to production. See the
 > [real-data activation log](#real-data-activation-log).
 >
-> - **FRED:** ingestion is built, and a backfill of 12 rates, FX, and macro series with full
->   revision history (182,232 stored versions, verified against the live API) was run into the
->   production database on 2026-11-01. Staging holds no FRED data.
->   **Licensing (2026-11-10):** FRED's terms require the Federal Reserve Bank of St. Louis's
->   prior written consent to store FRED content in a database. Consent has not been received.
->   **All new FRED ingestion is blocked** in every environment until it is. The existing
->   production FRED data is flagged for licensing review and remains unchanged. See
->   [`docs/data-sources.md`](docs/data-sources.md#fred-federal-reserve-bank-of-st-louis).
-> - **EIA:** the connector (12 energy series, 9 of them permitted; first-seen snapshot
->   versioning) is built and tested. Live ingestion has been run in staging only (9 permitted
->   series, 14,579 stored versions, last retrieved 2026-11-06). As last recorded, the production
->   database holds no EIA data; Phase 6.1 made no production connection, so this was not
->   re-checked.
+> **Direct sources only** ([ADR-0015](docs/adr/0015-direct-source-data-only.md)): Market Pulse
+> obtains data only directly from the organizations that publish it.
+>
+> - **EIA: active and approved.** The connector (12 energy series, 9 of them permitted;
+>   first-seen snapshot versioning) is built and tested. Live ingestion has been run in staging
+>   only (9 permitted series, 14,579 stored versions, last retrieved 2026-11-06). As last
+>   recorded, the production database holds no EIA data; Phase 6.1 made no production
+>   connection, so this was not re-checked.
+> - **FRED: retired as a data provider** (2026-11-11). Ingestion is blocked in code, the API
+>   never serves FRED, and the dashboard shows no FRED series. The 12 series backfilled into the
+>   production database on 2026-11-01 (182,232 stored versions) and the raw FRED files are
+>   preserved unchanged; any decision about them needs its own approved plan. Staging holds no
+>   FRED data. See [`docs/data-sources.md`](docs/data-sources.md#fred-federal-reserve-bank-of-st-louis).
+> - **Macroeconomic indicators** (rates, inflation, employment, output) are not available until
+>   a direct primary source is integrated. None is approved or integrated yet.
+> - **ERCOT: on hold** pending ERCOT's written permission (ADR-0014).
 > - **Not available:** commodity spot prices (WTI, Brent, Henry Hub) are licensed for personal
->   use only and are neither ingested nor displayed. ERCOT data is on hold pending ERCOT's
->   licensing answer (ADR-0014).
+>   use only and are neither ingested nor displayed.
 
 ## Principles
 
-- **Real data only.** Values come from primary sources (EIA, FRED, ERCOT, U.S. Treasury, SEC
-  EDGAR, and others). Nothing is fabricated, and missing data is shown as missing.
+- **Real data only, directly from its publisher.** Values come from the organizations that
+  publish them (today EIA), never from aggregators. Nothing is fabricated, and missing data is
+  shown as missing.
 - **Every data point is traceable:** source, timestamp, and freshness or quality status.
 - **Correlation is not causation.** Analytics separate statistical evidence from proposed
   explanations, and models are always compared against simple baselines.
@@ -83,7 +86,8 @@ Next.js application. The server calls the API; the browser never does (ADR-0004)
 
 | Module | Status |
 |---|---|
-| Market Overview, Natural Gas, Crude & Petroleum, Macroeconomics | Operational: latest values, calculated changes, and interactive historical charts |
+| Market Overview, Natural Gas, Crude & Petroleum | Operational (EIA): latest values, calculated changes, and interactive historical charts |
+| Macroeconomics | Planned: FRED is retired (ADR-0015) and no direct macroeconomic source is integrated yet; the page says so and shows no values |
 | Electricity | On hold: no ERCOT data is requested or shown (ADR-0014) |
 | Analytics, News, Watchlist, Journal | Planned: placeholder pages labeled as not operational |
 
@@ -165,34 +169,17 @@ IPv6 first, which Docker does not publish, causing slow connection timeouts.
 
 ### Ingesting data
 
-> **FRED ingestion is BLOCKED and not authorized for execution (2026-11-10).** FRED's terms
-> (legal clause (p), API clause (l)) require the St. Louis Fed's prior written consent to store
-> FRED content in a database, and that consent has not been received. Do not run the FRED
-> commands below, request a FRED API key, or call the FRED API until consent is recorded and a
-> separate approval is given. They are kept to document the connector. See
-> [`docs/data-sources.md`](docs/data-sources.md#fred-federal-reserve-bank-of-st-louis) for the
-> full licensing explanation.
+> **FRED is retired as a data provider** ([ADR-0015](docs/adr/0015-direct-source-data-only.md)).
+> `marketpulse ingest fred` is kept only to document the old connector: it refuses with an error
+> before reading any setting or contacting FRED, and no option lifts that. Do not request a FRED
+> API key. The connector's history is in
+> [`docs/data-sources.md`](docs/data-sources.md#fred-federal-reserve-bank-of-st-louis).
 
-FRED needs a free API key (<https://fredaccount.stlouisfed.org/apikeys>). Add it to `.env`
-together with a descriptive User-Agent:
+Provider requests carry a descriptive User-Agent, set in `.env`:
 
 ```bash
-FRED_API_KEY=...
 HTTP_USER_AGENT=MarketPulse/0.1 (you@example.com)
 ```
-
-Then, from `backend/` (**BLOCKED: not authorized for execution**; see the note above):
-
-```bash
-# BLOCKED: FRED ingestion is not authorized pending the St. Louis Fed's written consent.
-uv run marketpulse ingest fred                      # all 12 FRED series
-uv run marketpulse ingest fred --series ust_10y     # selected series (catalog codes)
-uv run marketpulse ingest fred --series real_gdp --full   # force a full re-fetch
-```
-
-The first run for a series is a full backfill of its version history; later runs are
-incremental. The command prints a per-series summary and exits 0 (all succeeded), 1 (a series
-failed), or 2 (a series was partial because of data conflicts).
 
 EIA needs a free API key (<https://www.eia.gov/opendata/register.php>), added to `.env` as
 `EIA_API_KEY=...`. Then, from `backend/`:
@@ -349,7 +336,7 @@ run (`ci<run id>x<run attempt>`).
 
 ## Real-data activation log
 
-Phase 6 is the operational track for showing real EIA and FRED data. Its phases are separate
+Phase 6 is the operational track for showing real data. Its phases are separate
 from the numbered milestones in the roadmap below.
 
 | Phase | Status | Scope |
@@ -405,15 +392,16 @@ stored there. No provider was contacted, and nothing was ingested.
 | Database | Isolated container and volume | Not connected to or modified during Phase 6.1 |
 | Role separation | Applied | Not applied; its role setup has not been reviewed |
 | EIA data | 9 permitted series, last retrieved 2026-11-06 | None, as last recorded (not re-checked) |
-| FRED data | None; new ingestion blocked | Backfilled 2026-11-01, as last recorded (not re-checked); flagged for licensing review and unchanged |
+| FRED data | None; FRED retired (ADR-0015) | Backfilled 2026-11-01, as last recorded (not re-checked); preserved unchanged and never served |
 
 ### Known limitations
 
 - Staging verification is not a production deployment, and passing it says nothing about the
   production database.
-- In staging, the macro dashboard has only been exercised with no data (elsewhere, only with
-  synthetic fixtures and test data), so its charts and its daily, quarterly, and basis-point
-  metrics are unvalidated on real values.
+- The dashboard has no macroeconomic data: FRED is retired and no direct macroeconomic source
+  is integrated yet (ADR-0015).
+- Staging runs code from before the FRED retirement (PR #18 and the dashboard update); it is
+  updated separately, with its own approval.
 - The Stale label has not been seen on real data: as of 2026-11-09, no series stored in staging
   was stale.
 - Staging's EIA data ages until it is next refreshed; no scheduler exists.
@@ -423,9 +411,9 @@ stored there. No provider was contacted, and nothing was ingested.
 | # | Milestone | Status |
 |---|---|---|
 | 0 | Foundation: repo structure, tooling, CI | ✅ |
-| 1 | Data core and the FRED and EIA connectors | In progress: FRED connector ✅ (new ingestion blocked pending licensing consent), EIA connector built (run live in staging only) |
+| 1 | Data core and the EIA connector | ✅ EIA connector built and tested (run live in staging only). The FRED connector was built, then retired (ADR-0015); its ingestion is blocked in code |
 | 2 | API v1: series, observations, freshness | ✅ Plus calculated metrics (`/metrics`) and a committed OpenAPI contract |
-| 3 | Dashboard v1 | ✅ Overview, Natural Gas, Crude & Petroleum, Macroeconomics; tested with synthetic fixtures and test databases; verified on real EIA data in staging (Phase 6.1), not yet deployed to production |
+| 3 | Dashboard v1 | ✅ Overview, Natural Gas, Crude & Petroleum; tested with synthetic fixtures and test databases; verified on real EIA data in staging (Phase 6.1), not yet deployed to production. Macroeconomics: planned, awaiting a direct source |
 | 4 | ERCOT and weather | ERCOT design proposed (ADR-0012 to ADR-0014); ERCOT source catalogued with ingestion blocked in code until ERCOT answers the licensing inquiry |
 | 5 | Equities and company intelligence | |
 | 6 | Events calendar and watchlists | |
@@ -439,24 +427,26 @@ stored there. No provider was contacted, and nothing was ingested.
 
 - An audited operator decision to retire a period EIA removed permanently (until then, such a
   period keeps counting as vanished and can cause snapshots to be rejected; ADR-0011).
-- Consolidate the FRED and EIA raw-response recorders into one shared component.
 - Use one clock for a new vanished-period issue's `created_at` and `last_detected_at`.
 - A series column on raw payloads, if a run ever needs to cover more than one series.
 - Scheduled ingestion (no scheduler exists yet).
 
 ## Data and licensing
 
-Market Pulse uses free government and primary sources first. Each source's terms, rate limits,
-and attribution requirements are documented in [`docs/data-sources.md`](docs/data-sources.md),
-and licensing is tracked per source and per series so that a future public deployment respects
-redistribution rights. See [ADR-0008](docs/adr/0008-data-sources-and-licensing.md).
+Market Pulse uses free government and primary sources, obtained directly from the organizations
+that publish them ([ADR-0015](docs/adr/0015-direct-source-data-only.md)). Each source's terms,
+rate limits, and attribution requirements are documented in
+[`docs/data-sources.md`](docs/data-sources.md), and licensing is tracked per source and per
+series so that a future public deployment respects redistribution rights. See
+[ADR-0008](docs/adr/0008-data-sources-and-licensing.md).
 
-Data from FRED is retrieved from FRED, Federal Reserve Bank of St. Louis; each series records
-its original producer (for example the U.S. Bureau of Labor Statistics or the Bureau of Economic
-Analysis). FRED's terms also require the notice "This product uses the FRED® API but is not
-endorsed or certified by the Federal Reserve Bank of St. Louis." before any future permitted
-display. They also restrict machine-learning development or training, so Market Pulse does not
-use FRED data for ML unless written clarification from the Bank permits it. Details are
-in [`docs/data-sources.md`](docs/data-sources.md#fred-federal-reserve-bank-of-st-louis).
+| Source | Status |
+|---|---|
+| EIA | Active and approved |
+| FRED | Retired as a data provider; historical records and raw files preserved, never served |
+| ERCOT | On hold pending ERCOT's written permission (ADR-0014) |
+
+Future macroeconomic data will come from approved direct primary sources, each added only after
+its terms (including storage rights) are verified and recorded.
 
 Nothing in this project is investment advice.

@@ -5,30 +5,22 @@ import { Section } from "@/components/dashboard/section";
 import { SeriesCards } from "@/components/dashboard/series-cards";
 import { UnavailablePricePanel } from "@/components/dashboard/unavailable-panel";
 import { FreshnessLegend } from "@/components/data/freshness-badge";
-import { FredLicensingNotice } from "@/components/data/fred-licensing";
+import { MacroStatusMessage } from "@/components/data/macro-status";
 import { SourceAttribution } from "@/components/data/source-attribution";
 import { PageHeader } from "@/components/shell/page-header";
 import { ApiStatus, ApiStatusFallback } from "@/components/system/api-status";
-import {
-  CRUDE_PETROLEUM,
-  ECONOMY,
-  KEY_INDICATORS,
-  METRICS,
-  NATURAL_GAS,
-  withoutFred,
-} from "@/lib/dashboard";
-import { FRED_LICENSING_STATUS } from "@/lib/fred-status";
+import { CRUDE_PETROLEUM, KEY_INDICATORS, METRICS, NATURAL_GAS } from "@/lib/dashboard";
+import { MACRO_STATUS } from "@/lib/fred-status";
 
 const CRUDE_CARDS = CRUDE_PETROLEUM.slice(1, 5);
 const GAS_CARDS = NATURAL_GAS.slice(1);
-const MACRO_CARDS = [METRICS.ust2y, METRICS.ust30y, METRICS.usdIndex, ...ECONOMY];
 
 export default function MarketOverview() {
   return (
     <div className="space-y-3">
       <PageHeader
         title="Market Overview"
-        description={`Latest observed values, with calculated changes labeled separately, across crude oil, petroleum products, and natural gas, each with its period, retrieval time, freshness, and source. Sources publish with a delay: nothing on this terminal is a live quote, and daily, weekly, and monthly series are judged against their own release schedules. ${FRED_LICENSING_STATUS.indicators}`}
+        description={`Latest observed values, with calculated changes labeled separately, across crude oil, petroleum products, and natural gas, each with its period, retrieval time, freshness, and source. Sources publish with a delay: nothing on this terminal is a live quote, and daily, weekly, and monthly series are judged against their own release schedules. ${MACRO_STATUS.indicators}`}
         aside={<FreshnessLegend />}
       />
 
@@ -41,7 +33,7 @@ export default function MarketOverview() {
           title="Key indicators"
           meta="Latest values"
           className="xl:col-span-3"
-          footer={<SourceAttribution metrics={withoutFred(KEY_INDICATORS)} />}
+          footer={<SourceAttribution metrics={KEY_INDICATORS} />}
         >
           <SeriesCards metrics={KEY_INDICATORS} />
         </Section>
@@ -81,19 +73,11 @@ export default function MarketOverview() {
 
         <Section
           title="Macroeconomic indicators"
-          meta={FRED_LICENSING_STATUS.label}
+          meta={MACRO_STATUS.label}
           href="/macro"
           className="xl:col-span-2"
-          footer={<FredLicensingNotice />}
         >
-          <div className="space-y-2">
-            <TimeSeriesChart
-              code={METRICS.ust10y.code}
-              title={METRICS.ust10y.label}
-              height={180}
-            />
-            <SeriesCards metrics={MACRO_CARDS} />
-          </div>
+          <MacroStatusMessage />
         </Section>
 
         <Section title="System" meta="Backend API">
