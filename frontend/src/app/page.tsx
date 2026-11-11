@@ -5,6 +5,7 @@ import { Section } from "@/components/dashboard/section";
 import { SeriesCards } from "@/components/dashboard/series-cards";
 import { UnavailablePricePanel } from "@/components/dashboard/unavailable-panel";
 import { FreshnessLegend } from "@/components/data/freshness-badge";
+import { FredLicensingNotice } from "@/components/data/fred-licensing";
 import { SourceAttribution } from "@/components/data/source-attribution";
 import { PageHeader } from "@/components/shell/page-header";
 import { ApiStatus, ApiStatusFallback } from "@/components/system/api-status";
@@ -14,7 +15,9 @@ import {
   KEY_INDICATORS,
   METRICS,
   NATURAL_GAS,
+  withoutFred,
 } from "@/lib/dashboard";
+import { FRED_LICENSING_STATUS } from "@/lib/fred-status";
 
 const CRUDE_CARDS = CRUDE_PETROLEUM.slice(1, 5);
 const GAS_CARDS = NATURAL_GAS.slice(1);
@@ -25,7 +28,7 @@ export default function MarketOverview() {
     <div className="space-y-3">
       <PageHeader
         title="Market Overview"
-        description="Latest observed values, with calculated changes labeled separately, across crude oil, petroleum products, natural gas, and the macro backdrop, each with its period, retrieval time, freshness, and source. Sources publish with a delay: nothing on this terminal is a live quote, and daily, weekly, and monthly series are judged against their own release schedules."
+        description={`Latest observed values, with calculated changes labeled separately, across crude oil, petroleum products, and natural gas, each with its period, retrieval time, freshness, and source. Sources publish with a delay: nothing on this terminal is a live quote, and daily, weekly, and monthly series are judged against their own release schedules. ${FRED_LICENSING_STATUS.indicators}`}
         aside={<FreshnessLegend />}
       />
 
@@ -38,7 +41,7 @@ export default function MarketOverview() {
           title="Key indicators"
           meta="Latest values"
           className="xl:col-span-3"
-          footer={<SourceAttribution metrics={KEY_INDICATORS} />}
+          footer={<SourceAttribution metrics={withoutFred(KEY_INDICATORS)} />}
         >
           <SeriesCards metrics={KEY_INDICATORS} />
         </Section>
@@ -78,10 +81,10 @@ export default function MarketOverview() {
 
         <Section
           title="Macroeconomic indicators"
-          meta="FRED · daily, monthly & quarterly"
+          meta={FRED_LICENSING_STATUS.label}
           href="/macro"
           className="xl:col-span-2"
-          footer={<SourceAttribution metrics={MACRO_CARDS} />}
+          footer={<FredLicensingNotice />}
         >
           <div className="space-y-2">
             <TimeSeriesChart
