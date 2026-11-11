@@ -10,6 +10,8 @@
  * shown as unavailable, never filled in.
  */
 
+import { FRED_LICENSING_STATUS } from "./fred-status.ts";
+
 export type MetricDefinition = {
   code: string; // catalog series code
   label: string;
@@ -53,7 +55,7 @@ export const METRICS = {
   curve10y2y: {
     code: "ust_10y_2y_spread",
     label: "10-year minus 2-year spread",
-    note: "FRED's published series (observed), not a Market Pulse calculation.",
+    note: `FRED's published series, not a Market Pulse calculation. ${FRED_LICENSING_STATUS.note}`,
   },
   fedFunds: {
     code: "fed_funds_effective",
@@ -115,6 +117,16 @@ export const ECONOMY: readonly MetricDefinition[] = [
   METRICS.industrialProduction,
   METRICS.realGdp,
 ];
+
+/** Every FRED series on the dashboard. All are unavailable (see fred-status.ts). */
+export const FRED_SERIES_CODES: ReadonlySet<string> = new Set(
+  [...RATES, ...ECONOMY].map((metric) => metric.code),
+);
+
+/** `metrics` without its FRED series: no FRED values are shown, so none are attributed. */
+export function withoutFred(metrics: readonly MetricDefinition[]): readonly MetricDefinition[] {
+  return metrics.filter((metric) => !FRED_SERIES_CODES.has(metric.code));
+}
 
 export type UnavailablePrice = {
   label: string;
