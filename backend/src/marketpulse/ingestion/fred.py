@@ -38,6 +38,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from marketpulse.core.config import Settings
+from marketpulse.core.source_access import require_source_ingestion_permitted
 from marketpulse.db.enums import RunStatus
 from marketpulse.db.models import DataQualityIssue, Observation, Series, Source
 from marketpulse.ingestion.raw_store import RawPayloadStore, record_raw_payload
@@ -274,7 +275,13 @@ def ingest_fred(
     client_factory: ClientFactory | None = None,
     catalog: Catalog | None = None,
 ) -> FredIngestionSummary:
-    """Ingest the selected FRED series (default: all in the catalog). Never raises per series."""
+    """Ingest the selected FRED series (default: all in the catalog). Never raises per series.
+
+    Raises SourceIngestionBlockedError first, before the catalog, the database, settings, or a
+    client are used, while FRED is in the source block list (core/source_access.py). Every shared
+    write path refuses FRED as well.
+    """
+    require_source_ingestion_permitted(SOURCE_CODE)
     catalog = catalog or load_catalog()
     specs = select_series(catalog, series_codes)
     source_id, series_ids = _resolve_database_rows(session_factory, specs)

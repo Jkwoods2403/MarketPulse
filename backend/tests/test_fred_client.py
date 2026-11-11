@@ -26,6 +26,7 @@ from marketpulse.sources.fred.client import (
 from marketpulse.sources.fred.parse import FredResponseError
 from marketpulse.sources.fred.windows import RealtimeWindow
 from marketpulse.sources.http import ProviderTransportError, RetryPolicy
+from source_block import with_fred_block_lifted
 
 FULL = RealtimeWindow(date(1776, 7, 4), REALTIME_OPEN_END)
 
@@ -410,7 +411,7 @@ def test_from_settings_requires_a_key() -> None:
 
 def test_empty_key_is_rejected() -> None:
     with pytest.raises(FredConfigError, match="empty"):
-        FredClient(SecretStr(""))
+        with_fred_block_lifted(lambda: FredClient(SecretStr("")))  # TEST ONLY: block lifted
 
 
 def test_from_settings_uses_configured_user_agent() -> None:
@@ -425,7 +426,10 @@ def test_from_settings_uses_configured_user_agent() -> None:
         fred_api_key=SecretStr(TEST_KEY),  # type: ignore[call-arg]
         http_user_agent="MarketPulse/0.1 (tests@example.invalid)",
     )
-    with FredClient.from_settings(settings, transport=httpx.MockTransport(handler)) as client:
+    client = with_fred_block_lifted(  # TEST ONLY: block lifted for construction
+        lambda: FredClient.from_settings(settings, transport=httpx.MockTransport(handler))
+    )
+    with client:
         client.series_metadata("GDPC1")
     assert sent[0].headers["User-Agent"] == "MarketPulse/0.1 (tests@example.invalid)"
 

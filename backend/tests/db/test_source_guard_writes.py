@@ -3,16 +3,30 @@
 A source row with code `ercot` exists here only to prove that nothing can be written for it:
 no ingestion run, raw payload row, observation, or data-quality issue. A permitted control source
 shows the block is specific to the blocked source. All rows are synthetic.
+
+FRED (retired as a provider, 2026-11-11) is blocked the same way: its synced catalog source is
+refused on every write path, and the FRED job and `marketpulse ingest fred`, pointed at this
+database with a key and a simulated FRED API, write nothing and send no request.
 """
 
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
+from test_fred_ingestion import SPECS as FRED_SPECS
+from test_fred_ingestion import dgs10_rows
+from test_fred_ingestion import make_client_factory as fred_client_factory
 
+import marketpulse.ingestion.fred as fred_job
+from fred_mock import TEST_KEY as FRED_TEST_KEY
+from fred_sim import FakeFred, SimSeries, metadata_for
+from marketpulse.cli import main
+from marketpulse.core.config import Settings, get_settings
 from marketpulse.core.source_access import SourceIngestionBlockedError
 from marketpulse.core.versions import ObservationVersion
 from marketpulse.db.models import (
@@ -24,6 +38,7 @@ from marketpulse.db.models import (
     Source,
 )
 from marketpulse.ingestion.catalog_sync import sync_catalog
+from marketpulse.ingestion.fred import ingest_fred
 from marketpulse.ingestion.observation_writer import write_versions
 from marketpulse.ingestion.raw_store import StoredPayload, record_raw_payload
 from marketpulse.ingestion.runs import IngestionRunTracker, record_series_versions
@@ -227,8 +242,10 @@ def test_a_permitted_source_is_unaffected(factory: sessionmaker[Session], ids: I
     assert counts(factory) == {**NOTHING, "runs": 1, "observations": 1}
 
 
-def test_the_catalog_synced_ercot_source_is_blocked(factory: sessionmaker[Session]) -> None:
-    """The real catalog's ERCOT source (Step 3A) is refused once synced; EIA and FRED are not."""
+def test_the_catalog_synced_ercot_and_fred_sources_are_blocked(
+    factory: sessionmaker[Session],
+) -> None:
+    """The real catalog's ERCOT and FRED sources are refused once synced; EIA is not."""
     with factory() as s, s.begin():
         sync_catalog(s, load_catalog())
     with factory() as s:
@@ -237,16 +254,120 @@ def test_the_catalog_synced_ercot_source_is_blocked(factory: sessionmaker[Sessio
         }
     assert set(source_ids) == {"eia", "fred", "ercot"}
 
-    tracker = IngestionRunTracker(factory, job="ercot.observations", source_id=source_ids["ercot"])
-    with pytest.raises(SourceIngestionBlockedError), tracker:
-        pass
+    for code in ("ercot", "fred"):
+        tracker = IngestionRunTracker(
+            factory, job=f"{code}.observations", source_id=source_ids[code]
+        )
+        with pytest.raises(SourceIngestionBlockedError), tracker:
+            pass
     assert counts(factory) == NOTHING
 
-    for code in ("eia", "fred"):
-        with IngestionRunTracker(
-            factory, job=f"{code}.observations", source_id=source_ids[code]
-        ) as run:
-            pass
-        assert run.status is not None
-        assert run.status.value == "succeeded"
-    assert counts(factory) == {**NOTHING, "runs": 2}
+    with IngestionRunTracker(factory, job="eia.observations", source_id=source_ids["eia"]) as run:
+        pass
+    assert run.status is not None
+    assert run.status.value == "succeeded"
+    assert counts(factory) == {**NOTHING, "runs": 1}
+
+
+def test_the_fred_source_is_refused_on_every_write_path(factory: sessionmaker[Session]) -> None:
+    """Raw payload row and both observation writers refuse the synced FRED source."""
+    with factory() as s, s.begin():
+        sync_catalog(s, load_catalog())
+    with factory() as s:
+        fred_id = s.scalar(select(Source.id).where(Source.code == "fred"))
+        series_id = s.scalar(
+            select(Series.id).where(Series.code == "ust_10y", Series.source_id == fred_id)
+        )
+    assert fred_id is not None and series_id is not None
+    with factory() as s, s.begin():
+        run = IngestionRun(job="test.unrelated", started_at=T1 - timedelta(hours=1))
+        s.add(run)  # a run with no source is allowed
+        s.flush()
+        run_id = run.id
+
+    with pytest.raises(SourceIngestionBlockedError), factory() as s, s.begin():
+        record_raw_payload(
+            s,
+            ingestion_run_id=run_id,
+            source_id=fred_id,
+            result=FetchResult(
+                content=b"{}",  # synthetic
+                status_code=200,
+                content_type="application/json",
+                url="https://api.example.com/synthetic",
+                retrieved_at=T1,
+                elapsed_seconds=0.1,
+                attempts=1,
+            ),
+            stored=StoredPayload("raw/fred/x/2026/11/synthetic.json.gz", "0" * 64, 2),
+        )
+    with pytest.raises(SourceIngestionBlockedError), factory() as s, s.begin():
+        write_versions(
+            s,
+            series_id=series_id,
+            ingestion_run_id=run_id,
+            versions=[version("4.1")],
+            retrieved_at=T1,
+        )
+    assert counts(factory) == {**NOTHING, "runs": 1}
+
+
+# --- the FRED job and `marketpulse ingest fred`, against this database ----------------------
+
+
+@pytest.fixture
+def fred_world(factory: sessionmaker[Session], tmp_path: Path) -> tuple[Settings, FakeFred]:
+    """A synced catalog, a synthetic key, and a simulated FRED API that would answer."""
+    with factory() as s, s.begin():
+        sync_catalog(s, load_catalog())
+    fake = FakeFred()
+    fake.series["DGS10"] = SimSeries(metadata_for(FRED_SPECS["ust_10y"]), dgs10_rows())
+    settings = Settings(
+        _env_file=None,
+        fred_api_key=SecretStr(FRED_TEST_KEY),  # type: ignore[call-arg]
+        marketpulse_data_dir=tmp_path,
+    )
+    return settings, fake
+
+
+def test_the_fred_job_writes_nothing(
+    factory: sessionmaker[Session], fred_world: tuple[Settings, FakeFred], tmp_path: Path
+) -> None:
+    settings, fake = fred_world
+    with pytest.raises(SourceIngestionBlockedError):
+        ingest_fred(
+            settings=settings,
+            session_factory=factory,
+            series_codes=["ust_10y"],
+            full=True,
+            client_factory=fred_client_factory(fake),
+        )
+    assert fake.requests == []  # no request reached the (simulated) provider
+    assert counts(factory) == NOTHING
+    assert list(tmp_path.rglob("*")) == []  # no raw payload file
+
+
+def test_the_fred_cli_writes_nothing(
+    factory: sessionmaker[Session],
+    fred_world: tuple[Settings, FakeFred],
+    test_db_name: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Pointed at this database with a key and a simulator, the command still refuses."""
+    _, fake = fred_world
+    monkeypatch.setenv("POSTGRES_DB", test_db_name)
+    monkeypatch.setenv("MARKETPULSE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("FRED_API_KEY", FRED_TEST_KEY)
+    monkeypatch.setattr(fred_job, "default_client_factory", lambda _s: fred_client_factory(fake))
+    get_settings.cache_clear()
+    try:
+        for args in (["ingest", "fred"], ["ingest", "fred", "--series", "ust_10y", "--full"]):
+            assert main(args) == 1
+            assert "ingestion of source 'fred' is blocked" in capsys.readouterr().out
+    finally:
+        get_settings.cache_clear()
+    assert fake.requests == []
+    assert counts(factory) == NOTHING
+    assert list(tmp_path.rglob("*")) == []

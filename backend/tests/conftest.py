@@ -16,6 +16,7 @@ from isolation import (
     isolated,
 )
 from marketpulse.core.config import get_settings
+from source_block import assert_real_block_in_force
 
 _stack = ExitStack()
 _repo_data_before: Fingerprint = {}
@@ -44,6 +45,19 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
             for change in changes:
                 reporter.write_line(f"  {change}", red=True)
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+@pytest.fixture(autouse=True)
+def _source_block_in_force() -> Iterator[None]:
+    """Every test starts and ends with the real source block (ERCOT, FRED) in force.
+
+    Autouse fixtures are set up before, and torn down after, the fixtures a test requests, so a
+    test-only lift (tests/source_block.py) made through a function-scoped monkeypatch is undone
+    before the closing check. A lift that outlives its test fails that test here.
+    """
+    assert_real_block_in_force()
+    yield
+    assert_real_block_in_force()
 
 
 @pytest.fixture(autouse=True)

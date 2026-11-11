@@ -3,6 +3,9 @@
 The FRED API is simulated (tests/fred_sim.py); everything else is the real pipeline: catalog,
 client, raw payload store on disk, ops.raw_payloads, the versioned writer, and run tracking.
 GDPC1 uses the real recorded revision history; other data is synthetic.
+
+FRED is retired and in the source block list. The job is kept, unreachable; these tests lift the
+block for their own process only (tests/source_block.py) to keep the dormant code tested.
 """
 
 import logging
@@ -45,6 +48,7 @@ from marketpulse.sources.fred.client import FredClient, ResponseHook
 from marketpulse.sources.fred.parse import parse_observations
 from marketpulse.sources.fred.versions import vintage_instant
 from marketpulse.sources.http import RetryPolicy
+from source_block import lift_fred_block
 
 CATALOG = load_catalog()
 SPECS = {s.code: s for s in CATALOG.series_for("fred")}
@@ -143,7 +147,10 @@ def make_client_factory(fake: FakeFred) -> Callable[[ResponseHook], FredClient]:
 
 
 @pytest.fixture
-def env(factory: sessionmaker[Session], tmp_path: Path) -> Env:
+def env(factory: sessionmaker[Session], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Env:
+    # TEST ONLY: FRED is blocked; these tests exercise the dormant job behind the block. The
+    # block itself, against this database, is tested in tests/db/test_source_guard_writes.py.
+    lift_fred_block(monkeypatch)
     with factory() as s, s.begin():
         sync_catalog(s, CATALOG)
     fake = FakeFred()
@@ -388,6 +395,9 @@ def test_run_finalization_failure_is_never_reported_as_success(
 # --- per-series isolation of database errors (D5.1) ----------------------------------------------
 
 
+ORIGINAL_LATEST_VINTAGE_DATE = fred_job._latest_vintage_date
+
+
 def break_latest_vintage_read(env: Env, monkeypatch: pytest.MonkeyPatch, *codes: str) -> None:
     """Make the stored-data read that chooses the mode fail for `codes` (connection reset)."""
     broken = {env.series_id(code) for code in codes}
@@ -427,22 +437,24 @@ def test_database_error_choosing_one_mode_does_not_stop_the_other_series(
     assert len(env.observations("real_gdp")) == 11
 
 
-def test_series_after_a_failed_mode_read_still_runs_incrementally(
-    env: Env, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_series_after_a_failed_mode_read_still_runs_incrementally(env: Env) -> None:
     env.run("ust_10y", "real_gdp")  # both stored
     latest = max(o.vintage_start for o in env.observations("real_gdp"))
-    break_latest_vintage_read(env, monkeypatch, "ust_10y")
-    failed, ok = env.run("ust_10y", "real_gdp").outcomes
-    assert (failed.status, failed.mode) == ("failed", "unknown")
-    assert (ok.status, ok.mode, ok.inserted) == ("succeeded", "incremental", 0)
-    ok_run = next(r for r in env.runs() if r.id == ok.run_id)
-    assert (
-        ok_run.params["realtime_start"]
-        == latest.astimezone(fred_job.FRED_TIMEZONE).date().isoformat()
-    )
+    # Its own MonkeyPatch, so leaving the block undoes only the broken read: the `env`
+    # fixture's test-only FRED block lift (on the test's `monkeypatch`) stays in force.
+    with pytest.MonkeyPatch.context() as broken_read:
+        break_latest_vintage_read(env, broken_read, "ust_10y")
+        failed, ok = env.run("ust_10y", "real_gdp").outcomes
+        assert (failed.status, failed.mode) == ("failed", "unknown")
+        assert (ok.status, ok.mode, ok.inserted) == ("succeeded", "incremental", 0)
+        ok_run = next(r for r in env.runs() if r.id == ok.run_id)
+        assert (
+            ok_run.params["realtime_start"]
+            == latest.astimezone(fred_job.FRED_TIMEZONE).date().isoformat()
+        )
 
-    monkeypatch.undo()  # a retry is an ordinary new run
+    # The read works again; a retry is an ordinary new run.
+    assert fred_job._latest_vintage_date is ORIGINAL_LATEST_VINTAGE_DATE
     (retry,) = env.run("ust_10y").outcomes
     assert (retry.status, retry.mode, retry.inserted) == ("succeeded", "incremental", 0)
 

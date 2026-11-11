@@ -11,6 +11,10 @@ It does not store anything. Every raw response is passed to the optional `on_res
 callback *before* parsing, so the ingestion layer can save it even if parsing fails.
 Rate limiting, retries (429/5xx/transport errors), timeouts, and credential redaction are
 handled by ProviderHttpClient.
+
+FRED is retired as a data provider and is in the source block list (core/source_access.py).
+The constructor refuses first, before an HTTP client exists, so no caller (job, script, or
+helper) can contact FRED through this client while the block is in force.
 """
 
 import json
@@ -26,6 +30,7 @@ from pydantic import SecretStr
 
 from marketpulse.core.config import Settings
 from marketpulse.core.ratelimit import RateLimiter
+from marketpulse.core.source_access import require_source_ingestion_permitted
 from marketpulse.sources.fred import (
     MAX_ROWS_PER_REQUEST,
     MAX_VINTAGES_PER_REQUEST,
@@ -49,6 +54,7 @@ from marketpulse.sources.http import (
     RetryPolicy,
 )
 
+SOURCE_CODE = "fred"  # the source block list key (core/source_access.py)
 FRED_BASE_URL = "https://api.stlouisfed.org/fred/"
 DEFAULT_USER_AGENT = "MarketPulse (+https://github.com/Jkwoods2403/MarketPulse)"
 MAX_VINTAGE_DATES_PER_PAGE = 10_000  # documented limit for fred/series/vintagedates
@@ -94,6 +100,8 @@ class FredClient:
         transport: httpx.BaseTransport | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
+        # First: raises SourceIngestionBlockedError before an HTTP client or any request exists.
+        require_source_ingestion_permitted(SOURCE_CODE)
         if not api_key.get_secret_value():
             raise FredConfigError("FRED API key is empty")
         config = ProviderClientConfig(

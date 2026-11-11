@@ -5,17 +5,25 @@ A series is served only if it is **permitted**:
 - its effective license (the series' `license_override`, else its source's license) is not
   `personal_use_only` (ADR-0008);
 - its source is not in the source-level ingestion block list (`core.source_access`, ADR-0014),
-  which currently blocks ERCOT.
+  which currently blocks ERCOT and FRED.
 
 The filter is applied in the SQL query and checked again on every returned row, so a series
 that is not permitted can never reach a response. There is no parameter to bypass it; an
 unknown and a non-permitted series code are indistinguishable to callers.
+
+Source codes are compared normalized on both sides: the SQL filter trims ASCII whitespace and
+lowercases (`btrim`/`lower`), the row check strips and casefolds (`ingestion_block_reason`). A
+row the SQL filter lets through but the row check refuses (e.g. a hand-written code with
+non-ASCII whitespace) is dropped and logged as an error, never served, and does not take the
+rest of the list down. A caller handing a non-permitted series to `observations` is a
+programming error and raises.
 """
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Protocol
+from typing import Any, Protocol
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.dialects.postgresql import distinct_on
@@ -27,7 +35,16 @@ from marketpulse.core.source_access import INGESTION_BLOCKED_SOURCES, ingestion_
 from marketpulse.db.models import Observation as ObservationRow
 from marketpulse.db.models import Series, Source
 
+logger = logging.getLogger(__name__)
+
 RESTRICTED_LICENSES = frozenset({"personal_use_only"})
+# Characters PostgreSQL's btrim removes from source codes before the block-list comparison.
+SQL_TRIMMED_WHITESPACE = " \t\n\r\x0b\x0c"
+
+
+def normalized_source_code_sql(column: Any) -> Any:
+    """SQL form of the block-list normalization: trim ASCII whitespace, then lowercase."""
+    return func.lower(func.btrim(column, SQL_TRIMMED_WHITESPACE))
 
 
 @dataclass(frozen=True)
@@ -94,8 +111,25 @@ class SeriesRepository(Protocol):
 
 def _require_permitted(metas: Sequence[SeriesMeta]) -> None:
     leaked = [m.code for m in metas if not is_permitted(m)]
-    if leaked:  # pragma: no cover  (the query already excludes them)
+    if leaked:
         raise RuntimeError(f"licensing filter failed for series {leaked}")
+
+
+def only_permitted(metas: Sequence[SeriesMeta]) -> list[SeriesMeta]:
+    """`metas` without any series that is not permitted; each dropped one is logged as an error.
+
+    Reached only when the SQL filter and the row check disagree (see the module docstring). The
+    series is withheld, as the row check requires, and the other series are still served.
+    """
+    kept = [m for m in metas if is_permitted(m)]
+    dropped = sorted(m.code for m in metas if not is_permitted(m))
+    if dropped:
+        logger.error(
+            "licensing filter: the database query returned series that are not permitted; "
+            "withheld: %s",
+            dropped,
+        )
+    return kept
 
 
 class DatabaseSeriesRepository:
@@ -114,7 +148,7 @@ class DatabaseSeriesRepository:
             .where(
                 Series.is_active.is_(True),
                 effective_license.not_in(sorted(RESTRICTED_LICENSES)),
-                func.lower(Source.code).not_in(sorted(INGESTION_BLOCKED_SOURCES)),
+                normalized_source_code_sql(Source.code).not_in(sorted(INGESTION_BLOCKED_SOURCES)),
             )
             .order_by(Source.code, Series.code)
         )
@@ -146,8 +180,7 @@ class DatabaseSeriesRepository:
             )
             for series, source, license_ in session.execute(query)
         ]
-        _require_permitted(metas)
-        return metas
+        return only_permitted(metas)
 
     @staticmethod
     def _latest(session: Session, series_ids: Sequence[int]) -> dict[int, LatestObservation]:

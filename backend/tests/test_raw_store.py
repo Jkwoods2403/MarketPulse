@@ -1,4 +1,8 @@
-"""RawPayloadStore: integrity, atomicity, idempotence, and path safety. Payloads are synthetic."""
+"""RawPayloadStore: integrity, atomicity, idempotence, and path safety. Payloads are synthetic.
+
+The sample source is "eia", a permitted source: the store refuses blocked sources (ERCOT, FRED)
+before writing anything (tests/test_source_ingestion_guard.py, tests/test_fred_source_block.py).
+"""
 
 import gzip
 import hashlib
@@ -35,13 +39,13 @@ def result(
 
 
 def test_save_writes_compressed_payload_with_hash_of_original_bytes(tmp_path: Path) -> None:
-    stored = RawPayloadStore(tmp_path).save("fred", "observations", result())
+    stored = RawPayloadStore(tmp_path).save("eia", "observations", result())
 
     digest = hashlib.sha256(BODY).hexdigest()
     assert stored.sha256 == digest
     assert stored.size_bytes == len(BODY)
     assert stored.relative_path == (
-        f"raw/fred/observations/2026/11/20261101T143005123456Z_{digest[:12]}.json.gz"
+        f"raw/eia/observations/2026/11/20261101T143005123456Z_{digest[:12]}.json.gz"
     )
     assert gzip.decompress((tmp_path / stored.relative_path).read_bytes()) == BODY
 
@@ -54,7 +58,7 @@ def test_load_round_trips_and_verifies(tmp_path: Path) -> None:
 
 def test_load_detects_tampering(tmp_path: Path) -> None:
     store = RawPayloadStore(tmp_path)
-    stored = store.save("fred", "observations", result())
+    stored = store.save("eia", "observations", result())
     (tmp_path / stored.relative_path).write_bytes(gzip.compress(b'{"tampered": true}'))
 
     with pytest.raises(RawPayloadIntegrityError):
@@ -63,47 +67,47 @@ def test_load_detects_tampering(tmp_path: Path) -> None:
 
 def test_saving_identical_payload_twice_is_idempotent(tmp_path: Path) -> None:
     store = RawPayloadStore(tmp_path)
-    first = store.save("fred", "observations", result())
-    second = store.save("fred", "observations", result())
+    first = store.save("eia", "observations", result())
+    second = store.save("eia", "observations", result())
     assert first == second
     assert len(list(tmp_path.rglob("*.gz"))) == 1
 
 
 def test_never_overwrites_a_different_file_at_the_same_path(tmp_path: Path) -> None:
     store = RawPayloadStore(tmp_path)
-    stored = store.save("fred", "observations", result())
+    stored = store.save("eia", "observations", result())
     path = tmp_path / stored.relative_path
     path.write_bytes(gzip.compress(b"something else"))
 
     with pytest.raises(FileExistsError):
-        store.save("fred", "observations", result())
+        store.save("eia", "observations", result())
     assert gzip.decompress(path.read_bytes()) == b"something else"
 
 
 def test_compressed_output_is_deterministic(tmp_path: Path) -> None:
-    a = RawPayloadStore(tmp_path / "a").save("fred", "obs", result())
-    b = RawPayloadStore(tmp_path / "b").save("fred", "obs", result())
+    a = RawPayloadStore(tmp_path / "a").save("eia", "obs", result())
+    b = RawPayloadStore(tmp_path / "b").save("eia", "obs", result())
     assert (tmp_path / "a" / a.relative_path).read_bytes() == (
         tmp_path / "b" / b.relative_path
     ).read_bytes()
 
 
 def test_no_temporary_files_left_behind(tmp_path: Path) -> None:
-    RawPayloadStore(tmp_path).save("fred", "observations", result())
+    RawPayloadStore(tmp_path).save("eia", "observations", result())
     assert [p.name for p in tmp_path.rglob(".tmp-*")] == []
 
 
 def test_timestamp_is_normalized_to_utc(tmp_path: Path) -> None:
     central = timezone(timedelta(hours=-5))
     local = datetime(2026, 11, 1, 9, 30, 5, 123456, tzinfo=central)  # == RETRIEVED
-    stored = RawPayloadStore(tmp_path).save("fred", "observations", result(retrieved_at=local))
+    stored = RawPayloadStore(tmp_path).save("eia", "observations", result(retrieved_at=local))
     assert "/20261101T143005123456Z_" in stored.relative_path
 
 
 def test_rejects_naive_timestamp(tmp_path: Path) -> None:
     naive = datetime(2026, 11, 1, 14, 30)  # noqa: DTZ001  (deliberately naive)
     with pytest.raises(ValueError, match="timezone-aware"):
-        RawPayloadStore(tmp_path).save("fred", "observations", result(retrieved_at=naive))
+        RawPayloadStore(tmp_path).save("eia", "observations", result(retrieved_at=naive))
 
 
 @pytest.mark.parametrize(
@@ -119,7 +123,7 @@ def test_rejects_naive_timestamp(tmp_path: Path) -> None:
 def test_extension_follows_content_type(
     tmp_path: Path, content_type: str | None, extension: str
 ) -> None:
-    stored = RawPayloadStore(tmp_path).save("fred", "obs", result(content_type=content_type))
+    stored = RawPayloadStore(tmp_path).save("eia", "obs", result(content_type=content_type))
     assert stored.relative_path.endswith(f".{extension}.gz")
 
 
@@ -131,7 +135,7 @@ def test_rejects_unsafe_source_or_dataset_names(tmp_path: Path, segment: str) ->
     with pytest.raises(ValueError):
         store.save(segment, "observations", result())
     with pytest.raises(ValueError):
-        store.save("fred", segment, result())
+        store.save("eia", segment, result())
     assert list(tmp_path.iterdir()) == []
 
 

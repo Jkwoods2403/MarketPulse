@@ -3,6 +3,11 @@
 Clean data comes from the real FRED and EIA pipelines (simulated providers; all values are
 SYNTHETIC or recorded public fixtures). Each corruption test then breaks exactly one invariant
 with direct SQL and asserts that exactly the matching check reports it.
+
+FRED is now in the source block list. Its rows are seeded the way production's were, before the
+block, by lifting the block only while seeding (tests/source_block.py); every verification below
+runs with the block in force, showing that read-only verification of stored FRED data still
+works and writes nothing.
 """
 
 import gzip
@@ -23,6 +28,7 @@ from test_fred_ingestion import SPECS as FRED_SPECS
 from test_fred_ingestion import dgs10_rows, gdpc1_rows
 from test_fred_ingestion import make_client_factory as fred_client_factory
 
+import marketpulse.core.source_access as source_access
 import marketpulse.ingestion.verify as verify_module
 from eia_sim import FakeEia
 from fred_mock import TEST_KEY as FRED_KEY
@@ -35,6 +41,7 @@ from marketpulse.ingestion.fred import ingest_fred
 from marketpulse.ingestion.raw_store import RawPayloadStore
 from marketpulse.ingestion.verify import VerifyConfigError, VerifyReport, verify
 from marketpulse.sources.catalog import load_catalog
+from source_block import lift_fred_block
 from test_eia_client import KEY as EIA_KEY
 
 CATALOG = load_catalog()
@@ -153,13 +160,17 @@ def stored(factory: sessionmaker[Session], tmp_path: Path) -> Iterator[Stored]:
     fred = FakeFred()
     fred.series["DGS10"] = SimSeries(metadata_for(FRED_SPECS["ust_10y"]), dgs10_rows())
     fred.series["GDPC1"] = SimSeries(metadata_for(FRED_SPECS["real_gdp"]), gdpc1_rows())
-    summary = ingest_fred(
-        settings=settings,
-        session_factory=factory,
-        series_codes=["ust_10y", "real_gdp"],
-        client_factory=fred_client_factory(fred),
-    )
+    # TEST ONLY: seed FRED rows as they were ingested before the block; restored right after.
+    with pytest.MonkeyPatch.context() as seeding:
+        lift_fred_block(seeding)
+        summary = ingest_fred(
+            settings=settings,
+            session_factory=factory,
+            series_codes=["ust_10y", "real_gdp"],
+            client_factory=fred_client_factory(fred),
+        )
     assert summary.exit_code == 0
+    assert source_access.ingestion_block_reason("fred") is not None  # in force again
 
     eia = FakeEia(EIA_KEY)
     add_series(eia, STORAGE, weekly(10))

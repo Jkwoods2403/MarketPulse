@@ -433,9 +433,9 @@ def test_ercot_source_is_classified_conservatively_and_blocked() -> None:
     assert catalog.series_for("ercot") == []  # series follow the read-only probe (Step 3B)
 
 
-def test_only_ercot_is_blocked_among_catalog_sources() -> None:
+def test_exactly_ercot_and_fred_are_blocked_among_catalog_sources() -> None:
     blocked = {code for code in load_catalog().sources if ingestion_block_reason(code)}
-    assert blocked == {"ercot"}
+    assert blocked == {"ercot", "fred"}  # EIA stays permitted
 
 
 def test_no_real_series_overrides_its_sources_vintage_basis() -> None:
