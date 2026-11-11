@@ -29,7 +29,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     group: "markets",
   },
   { href: "/electricity", label: "Electricity", short: "Power", status: "blocked", group: "markets" },
-  { href: "/macro", label: "Macroeconomics", short: "Macro", status: "active", group: "markets" },
+  { href: "/macro", label: "Macroeconomics", short: "Macro", status: "planned", group: "markets" },
   { href: "/analytics", label: "Analytics", short: "Analytics", status: "planned", group: "research" },
   { href: "/news", label: "News", short: "News", status: "planned", group: "research" },
   { href: "/watchlist", label: "Watchlist", short: "Watchlist", status: "planned", group: "research" },

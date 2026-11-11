@@ -1,33 +1,26 @@
 /**
- * The single statement of FRED's licensing status, used wherever the dashboard names FRED.
+ * The single statement of why the dashboard has no macroeconomic data, used wherever it says so.
  *
- * FRED's terms (legal clause (p), API clause (l)) require the Federal Reserve Bank of St. Louis's
- * prior written consent to store FRED content in a database. That consent has not been received,
- * so Market Pulse does not ingest new FRED data and shows no FRED values. The full record is in
- * docs/data-sources.md (FRED section). Change this text only when that status changes.
+ * FRED is retired as a Market Pulse data provider (ADR-0015): Market Pulse obtains data only
+ * directly from the original publishing organizations. No FRED series is requested or shown.
+ * Macroeconomic indicators (rates, inflation, employment, output) return only when a direct
+ * primary source is integrated; none is available yet. Change this text only when that changes.
  */
-export const FRED_LICENSING_STATUS = {
+export const MACRO_STATUS = {
   /** Section label, where the source and cadence would otherwise be shown. */
-  label: "FRED · unavailable (licensing)",
-  /** One-sentence explanation for page descriptions. */
+  label: "Not available · direct sources planned",
+  /** One-sentence explanation for page descriptions and section bodies. */
   summary:
-    "FRED data is unavailable: storing it requires the prior written consent of the Federal " +
-    "Reserve Bank of St. Louis, which has not been received.",
+    "FRED is retired as a data provider: Market Pulse uses data only directly from the " +
+    "original publishing organizations. Macroeconomic indicators will return when a direct " +
+    "primary source is integrated; none is available yet.",
   /** For pages that list the dashboard's coverage (the Market Overview). */
-  indicators: "Macroeconomic indicators from FRED are unavailable pending licensing consent.",
-  /** Short form for per-series notes. */
-  note: "Unavailable pending FRED licensing consent.",
-  /** Heading for the Macro page's calculated-metrics area. */
-  metricsHeading: "Calculated metrics unavailable",
-  /** Why no metrics are calculated for FRED series. */
-  metrics:
-    "Market Pulse derives calculated metrics only from stored observations. FRED data is not " +
-    "stored, pending licensing consent, so no changes, ranges, or other metrics are calculated " +
-    "for these series.",
-  /** Where the licensing decision is documented, in the repository. */
-  reference: "docs/data-sources.md",
-  /** The FRED section of that document in the public repository. */
+  indicators: "Macroeconomic indicators are not available yet.",
+  /** Heading for the state message on the Macro page and the Overview. */
+  heading: "No macroeconomic data yet",
+  /** Where the decision is recorded, in the repository. */
+  reference: "ADR-0015",
+  /** That decision record in the public repository. */
   referenceUrl:
-    "https://github.com/Jkwoods2403/MarketPulse/blob/main/docs/data-sources.md" +
-    "#fred-federal-reserve-bank-of-st-louis",
+    "https://github.com/Jkwoods2403/MarketPulse/blob/main/docs/adr/0015-direct-source-data-only.md",
 } as const;

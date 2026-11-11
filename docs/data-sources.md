@@ -10,38 +10,47 @@ The authoritative list of tracked series is the version-controlled catalog in
 
 | Source | Status | License (catalog) | Access requirement (catalog) |
 |---|---|---|---|
-| [FRED](#fred-federal-reserve-bank-of-st-louis) | **New ingestion blocked** pending the Bank's prior written consent to database storage (2026-11-10). Historical data backfilled into production on 2026-11-01 is flagged for licensing review | `attribution_required` | `registration_required` (free API key) |
-| [EIA](#eia-us-energy-information-administration) | Connector built (12 series, first-seen snapshots); run against the live API in staging only (9 permitted series) | `public_domain`; 3 series `personal_use_only` | `registration_required` (free API key) |
+| [EIA](#eia-us-energy-information-administration) | **Active and approved.** Connector built (12 series, first-seen snapshots); run against the live API in staging only (9 permitted series) | `public_domain`; 3 series `personal_use_only` | `registration_required` (free API key) |
+| [FRED](#fred-federal-reserve-bank-of-st-louis) | **Retired as a data provider** (ADR-0015, 2026-11-11). Ingestion is blocked in code and FRED is never served. Historical data backfilled into production on 2026-11-01 and the raw FRED files are preserved unchanged | `attribution_required` | `registration_required` (free API key) |
 | [ERCOT](#ercot-electric-reliability-council-of-texas) | Source catalogued, no series; **ingestion blocked** pending ERCOT licensing inquiry SS0007218 | `no_redistribution` (conservative) | `subscription_required` |
 
 The access requirement (ADR-0014) records how a source's data may be fetched (`open`,
 `registration_required`, or `subscription_required`), separately from the license, which records
 what may be done with it.
 
+**Direct sources only (ADR-0015).** Market Pulse obtains data only directly from the organization
+that publishes it; aggregators and republishers are not used. A new source (for example a direct
+macroeconomic publisher such as the U.S. Treasury, BLS, BEA, or the Federal Reserve) is added only
+after its official access method and terms, including whether observations may be stored, are
+verified and recorded here and the project owner approves it. None is integrated yet.
+
 ---
 
 ## FRED (Federal Reserve Bank of St. Louis)
 
+> **Status (2026-11-11): FRED is RETIRED as a Market Pulse data provider**
+> ([ADR-0015](adr/0015-direct-source-data-only.md)). This is a project decision, not a pending
+> licensing question: Market Pulse obtains data only directly from the organizations that publish
+> it, and written consent from the Bank would not by itself reactivate FRED.
+>
+> - **Enforced in code** (PR #18): `fred` is in the source block list
+>   (`backend/src/marketpulse/core/source_access.py`). `marketpulse ingest fred`, the FRED job, the
+>   FRED client, and `scripts/record_fred_fixtures.py` all refuse before any request. The data API
+>   never serves a FRED series, and the dashboard defines and shows none.
+> - **Historical data is preserved:** the 12 series backfilled into the production database on
+>   2026-11-01 ([below](#tracked-series-and-backfill-results)) and the raw FRED responses under
+>   `data/raw/fred/` are kept unchanged. Any retention, deletion or archiving decision requires its
+>   own reviewed and approved plan. Read-only `marketpulse verify` may still check them.
+> - **Staging** holds no FRED data.
+> - **Replacement:** the macroeconomic series below are not replaced yet. Any replacement comes
+>   from an approved direct primary source (the original producers named in the table below).
+>
+> The rest of this section is the historical record of the FRED integration and of the
+> 2026-11-10 terms review that first blocked it.
+
 *API facts and series were verified 2026-11-01 against the FRED API documentation, every tracked
 series' page, and the live API. The terms were re-reviewed on 2026-11-10 (below). That review
 found restrictions the 2026-11-01 record did not include.*
-
-> **Status (2026-11-10): new FRED ingestion is BLOCKED** until the Federal Reserve Bank of
-> St. Louis gives prior written consent to store FRED content in a database. This applies to
-> staging and production, including the planned Phase 6.2 Stage D full-vintage backfill into
-> staging. Until consent is recorded and a separate approval is given, do not run
-> `marketpulse ingest fred`, request a FRED API key, or call the FRED API.
->
-> - **Historical data already in production:** the 12 series backfilled into the production
->   database on 2026-11-01 ([below](#tracked-series-and-backfill-results)) are flagged for
->   licensing review. They are kept unchanged for now. Any retention, deletion or archiving
->   decision requires its own reviewed and approved plan.
-> - **New ingestion:** blocked in every environment. Staging holds no FRED data.
-> - **Decision record:** the owner's Stage D decision is recorded in
->   `STAGE_D_DECISION_FRED_BLOCKED.md`, in the Phase 6.2 Stage D evidence kept outside this
->   repository with the other staging operations records. A written-consent request covering
->   storage, retention, dashboard display, derived metrics and portfolio demonstration has been
->   drafted for the owner to send.
 
 ### Terms and attribution
 
@@ -95,8 +104,8 @@ FRED data, alongside the per-value attribution below.
   using FRED names in hostnames.
 - **Termination:** if access ends, all copies of FRED content must be destroyed.
 - **Catalog license:** `attribution_required`. The license value does not encode the
-  storage-consent requirement. That requirement is enforced by this block and by the owner's
-  decision, not by the catalog.
+  storage-consent requirement; FRED's exclusion is enforced by the source block list
+  (ADR-0015), not by the catalog.
 - **Per-value attribution text:** "Source: original data producer, retrieved from FRED, Federal
   Reserve Bank of St. Louis". Each series also records its original producer
   (`original_source`), e.g. U.S. Bureau of Labor Statistics for CPI.
@@ -134,9 +143,9 @@ incident…" and "Fix FRED window planning…", and `backend/tests/test_fred_win
 
 ### How Market Pulse ingests FRED
 
-> **Blocked (2026-11-10):** the commands below describe the connector, which still exists. Do
-> not run them against any database until written consent is recorded and a separate approval
-> is given ([status](#fred-federal-reserve-bank-of-st-louis)).
+> **Retired (2026-11-11, ADR-0015):** the commands below describe the connector, which is kept
+> unreachable. They refuse with an error: `fred` is in the source block list
+> ([status](#fred-federal-reserve-bank-of-st-louis)).
 
 ```bash
 cd backend
@@ -203,8 +212,8 @@ Series are independent: a failure is recorded on that series' run and the job co
 
 Backfilled into the production database on 2026-11-01 (runs 2 and 7–17), before the
 2026-11-10 terms review. These are historical figures as recorded on that date and have not been
-re-checked. This data is flagged for licensing review and stays unchanged until a separate plan is
-approved. "Versions" counts every stored real-time version; "current" is one per period.
+re-checked. This data is preserved unchanged and never served (ADR-0015) until a separate plan
+is approved. "Versions" counts every stored real-time version; "current" is one per period.
 
 | Code | FRED ID | Freq. | Periods | Versions | Current | First vintage |
 |---|---|---|---|---|---|---|
@@ -239,7 +248,8 @@ Verification after the backfill (2026-11-01):
 
 *Catalog and API behavior verified 2026-11-01 against the live API (recorded fixtures in
 `backend/tests/fixtures/eia/`). The connector (Milestone 1.5) is built and tested against a
-simulator of that behavior; **no EIA data has been ingested from the live API yet.***
+simulator of that behavior. Live EIA ingestion has been run in staging only (9 permitted series,
+last retrieved 2026-11-06, as last recorded).*
 
 ### Terms and licensing
 

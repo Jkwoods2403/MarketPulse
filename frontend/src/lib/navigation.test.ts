@@ -12,9 +12,10 @@ describe("navigation", () => {
 
   it("marks only modules with data as operational", () => {
     const active = NAV_ITEMS.filter((i) => i.status === "active").map((i) => i.href);
-    assert.deepEqual(active, ["/", "/natural-gas", "/crude-petroleum", "/macro"]);
+    assert.deepEqual(active, ["/", "/natural-gas", "/crude-petroleum"]);
     assert.equal(navItem("/electricity")?.status, "blocked");
-    for (const href of ["/analytics", "/news", "/watchlist", "/journal"]) {
+    // Macro: FRED is retired (ADR-0015) and no direct macro source is integrated yet.
+    for (const href of ["/macro", "/analytics", "/news", "/watchlist", "/journal"]) {
       assert.equal(navItem(href)?.status, "planned");
     }
   });

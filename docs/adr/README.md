@@ -15,13 +15,14 @@ update the old ADR's status to `Superseded by ADR-NNNN`.
 | [0005](0005-charting-libraries.md) | Charting: Lightweight Charts and Apache ECharts | Accepted |
 | [0006](0006-backend-and-data-pipeline-stack.md) | Backend and data pipeline stack: Python, FastAPI, scheduled ingestion | Accepted |
 | [0007](0007-postgresql-and-data-lineage-model.md) | PostgreSQL and the data lineage model | Accepted |
-| [0008](0008-data-sources-and-licensing.md) | Data sources and licensing | Accepted |
+| [0008](0008-data-sources-and-licensing.md) | Data sources and licensing | Accepted; amended by ADR-0015 |
 | [0009](0009-analytics-and-research-architecture.md) | Analytics and research architecture | Accepted |
 | [0010](0010-cost-and-deployment-strategy.md) | Cost and deployment strategy | Accepted |
 | [0011](0011-first-seen-snapshot-versioning.md) | First-seen snapshot versioning for providers without vintages | Accepted |
 | [0012](0012-ercot-storage-and-timestamp-architecture.md) | ERCOT storage and timestamp architecture | Proposed |
 | [0013](0013-ercot-market-time-and-daylight-saving.md) | ERCOT market time and daylight saving | Proposed |
 | [0014](0014-ercot-licensing-and-ingestion-gate.md) | ERCOT licensing classification and the pending-clarification ingestion gate | Proposed |
+| [0015](0015-direct-source-data-only.md) | Direct-source data only; FRED retired as a data provider | Accepted |
 
 ## Template
 

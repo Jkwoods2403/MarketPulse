@@ -74,7 +74,8 @@ These rules apply to code, UI, seed data, tests, documentation, and any text Cla
 - **Every displayed market observation must identify its source and timestamp.**
 - Clearly label data as **live**, **delayed**, **historical**, **estimated**, **forecast**, or **unavailable**.
 - Store the source, retrieval time, and (where provided) the source's own observation/publication time for every data point.
-- Prefer reliable primary sources: **EIA, FRED, ERCOT, Federal Reserve, U.S. Treasury, BLS, BEA, NOAA/NWS, SEC EDGAR, company investor relations**, and reputable market-data providers.
+- **Obtain data only directly from the organization that publishes it** (ADR-0015). Do not use aggregators or republishers as data providers. **FRED is retired** as a data provider: do not propose, fetch, ingest, or display FRED data. Historical FRED records and raw files are preserved and must not be deleted without a separately approved plan.
+- Current source status: **EIA** is active and approved. **ERCOT** is on hold pending ERCOT's written permission (ADR-0014). Candidate direct primary sources for future work include the **Federal Reserve, U.S. Treasury, BLS, BEA, NOAA/NWS, SEC EDGAR, and company investor relations**; each is added only after its terms (including storage rights) are verified and recorded in `docs/data-sources.md` and the project owner approves it. A licensed market-data vendor remains a separate future decision (ADR-0008).
 - Respect each source's terms of use and rate limits.
 - Mock or placeholder data is allowed only in tests and local development fixtures, must be obviously labeled as such, and must never reach a production view.
 - Do not make unsupported trading recommendations. Analysis may describe exposures, scenarios, and risks; it must not tell the user to buy or sell.
