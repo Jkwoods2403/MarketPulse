@@ -23,6 +23,7 @@ from marketpulse.sources.fred.windows import (
     effective_vintage_count as effective_vintage_count_planner,
 )
 from marketpulse.sources.http import RetryPolicy
+from source_block import with_fred_block_lifted
 
 DAY = timedelta(days=1)
 
@@ -48,12 +49,15 @@ ISO = [d.isoformat() for d in VINTAGES]
 
 
 def client_for(fake: FakeFred) -> FredClient:
-    return FredClient(
-        SecretStr(TEST_KEY),
-        transport=fake.transport(),
-        rate_limiter=UnlimitedLimiter(),
-        retry=RetryPolicy(max_attempts=1),
-        sleep=lambda _: None,
+    # TEST ONLY: FRED is blocked; lifted just for constructing this simulator-wired client.
+    return with_fred_block_lifted(
+        lambda: FredClient(
+            SecretStr(TEST_KEY),
+            transport=fake.transport(),
+            rate_limiter=UnlimitedLimiter(),
+            retry=RetryPolicy(max_attempts=1),
+            sleep=lambda _: None,
+        )
     )
 
 

@@ -12,6 +12,20 @@ recorded licensing answer and the project owner's decision (ADR-0014, docs/data-
 
 Checked at every shared write path (run tracker, raw payload store and row, observation
 writers) and by each job's entry point before it creates a provider client.
+
+A blocked source is also never served: the data API's repository excludes every series of a
+blocked source (api/repository.py), so observations already stored for it (for example FRED
+data in production) stay in the database untouched but never reach a response. Read-only
+verification (`marketpulse verify`, including --replay) still checks them; it writes nothing and
+contacts no provider.
+
+Blocked sources:
+- ercot: licensing clarification pending (ADR-0014).
+- fred: retired as a data provider (project owner's decision, 2026-11-11): Market Pulse obtains
+  data only directly from the original publishing organizations. Independently, FRED's terms
+  require the Federal Reserve Bank of St. Louis's prior written consent to store FRED content in
+  a database (docs/data-sources.md). The FRED connector and its stored records are kept, not
+  deleted, pending a separately approved plan.
 """
 
 from collections.abc import Mapping
@@ -24,6 +38,13 @@ INGESTION_BLOCKED_SOURCES: Final[Mapping[str, str]] = MappingProxyType(
             "ERCOT licensing clarification is pending (ERCOT ticket SS0007218). ADR-0014 forbids "
             "any ERCOT ingestion, staging included, until ERCOT's written answer and the project "
             "owner's decision are recorded in docs/data-sources.md"
+        ),
+        "fred": (
+            "FRED is retired as a data provider (project owner's decision, 2026-11-11): Market "
+            "Pulse obtains data only directly from the original publishing organizations. FRED's "
+            "terms also require the Federal Reserve Bank of St. Louis's prior written consent to "
+            "store FRED content in a database (docs/data-sources.md). Stored FRED records are "
+            "kept unchanged and are never served"
         ),
     }
 )

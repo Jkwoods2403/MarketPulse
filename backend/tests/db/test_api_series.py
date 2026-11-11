@@ -1,10 +1,12 @@
 """Read-only series API against PostgreSQL, with synthetic rows in the test database.
 
-Restricted (personal_use_only) series, series of blocked sources (ERCOT), and inactive series
-are given observations on purpose, so their absence from every response proves the licensing
-filter rather than an empty table.
+Restricted (personal_use_only) series, series of blocked sources (ERCOT, FRED), and inactive
+series are given observations on purpose, so their absence from every response proves the
+licensing filter rather than an empty table. The FRED rows stand in for the historical FRED data
+in production: stored, current and revised, and never served.
 """
 
+import logging
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -22,11 +24,15 @@ NOW = datetime(2026, 11, 8, 15, 0, tzinfo=UTC)
 T0 = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
 T1 = datetime(2026, 11, 6, 12, 0, tzinfo=UTC)
 
-PERMITTED = {"eia_weekly_test", "fred_daily_test", "fred_empty_test"}
+PERMITTED = {"eia_weekly_test", "vintaged_daily_test", "vintaged_empty_test"}
 NOT_PERMITTED = {
     "eia_override_test",  # series license_override personal_use_only
     "vendor_series_test",  # source license personal_use_only
     "ercot_series_test",  # blocked source
+    "fred_ust_10y_test",  # blocked source (FRED, retired as a provider), current version
+    "fred_revised_test",  # blocked source (FRED), revised: closed and current versions
+    "fred_upper_test",  # blocked source spelled "FRED" (hand-written row, not via the catalog)
+    "fred_spaced_test",  # blocked source spelled " fred\t" (hand-written row)
     "eia_inactive_test",  # inactive
 }
 
@@ -114,7 +120,9 @@ def world(factory: sessionmaker[Session]) -> None:
         s.add(run)
         s.flush()
         eia = _source(s, "eia", "public_domain")
-        fred = _source(s, "fred", "attribution_required")
+        # A permitted, synthetic provider with real-time vintages (not FRED).
+        vintaged = _source(s, "vintage_provider_test", "attribution_required")
+        fred = _source(s, "fred", "attribution_required")  # blocked: never served
         vendor = _source(s, "vendor", "personal_use_only")
         ercot = _source(s, "ercot", "no_redistribution")
 
@@ -127,13 +135,13 @@ def world(factory: sessionmaker[Session]) -> None:
         _obs(s, weekly, run.id, date(2026, 10, 24), date(2026, 10, 30), "430.250", vintage_start=T1)
 
         daily = _series(
-            s, fred, "fred_daily_test", "daily", "business_day", staleness_days=5,
+            s, vintaged, "vintaged_daily_test", "daily", "business_day", staleness_days=5,
             basis="source_vintage",
         )  # fmt: skip
         _obs(s, daily, run.id, date(2026, 10, 28), date(2026, 10, 28), "4.190")
-        _obs(s, daily, run.id, date(2026, 10, 29), date(2026, 10, 29), None)  # "." at FRED
+        _obs(s, daily, run.id, date(2026, 10, 29), date(2026, 10, 29), None)  # no value
 
-        _series(s, fred, "fred_empty_test", "monthly", "month", staleness_days=45)
+        _series(s, vintaged, "vintaged_empty_test", "monthly", "month", staleness_days=45)
 
         hidden = [
             _series(
@@ -143,12 +151,31 @@ def world(factory: sessionmaker[Session]) -> None:
             _series(s, vendor, "vendor_series_test", "daily", "business_day", staleness_days=14),
             _series(s, ercot, "ercot_series_test", "hourly", "hour_ending", staleness_days=2),
             _series(
+                s, fred, "fred_ust_10y_test", "daily", "business_day", staleness_days=5,
+                basis="source_vintage",
+            ),
+            _series(
                 s, eia, "eia_inactive_test", "weekly", "week_ending_friday", staleness_days=14,
                 is_active=False,
             ),
         ]  # fmt: skip
         for series in hidden:
             _obs(s, series, run.id, date(2026, 11, 2), date(2026, 11, 2), "99.000")
+
+        # FRED history with a revision: a closed version and its current successor.
+        revised = _series(
+            s, fred, "fred_revised_test", "quarterly", "quarter", staleness_days=125,
+            basis="source_vintage",
+        )  # fmt: skip
+        _obs(s, revised, run.id, date(2026, 4, 1), date(2026, 6, 30), "100.0", vintage_end=T1)
+        _obs(s, revised, run.id, date(2026, 4, 1), date(2026, 6, 30), "100.5", vintage_start=T1)
+
+        # Hand-written source codes the catalog would reject: the SQL filter must withhold them
+        # itself (lower + btrim), so the rest of the list is still served.
+        for code, series_code in (("FRED", "fred_upper_test"), (" fred\t", "fred_spaced_test")):
+            variant = _source(s, code, "attribution_required")
+            row = _series(s, variant, series_code, "daily", "business_day", staleness_days=5)
+            _obs(s, row, run.id, date(2026, 11, 2), date(2026, 11, 2), "99.000")
 
 
 @pytest.fixture
@@ -171,7 +198,7 @@ def test_list_serves_only_permitted_series(client: TestClient) -> None:
     assert {s["code"] for s in body["series"]} == PERMITTED
     assert all(s["synthetic"] is False for s in body["series"])
     assert all(s["license"] != "personal_use_only" for s in body["series"])
-    assert all(s["source"]["code"] != "ercot" for s in body["series"])
+    assert {s["source"]["code"] for s in body["series"]}.isdisjoint({"ercot", "fred"})
 
 
 @pytest.mark.parametrize("code", sorted(NOT_PERMITTED | {"no_such_series"}))
@@ -190,16 +217,64 @@ def test_restricted_blocked_inactive_and_unknown_codes_look_identical(
 
 @pytest.mark.parametrize(
     "query",
-    ["include_restricted=true", "license=personal_use_only", "source=ercot", "all=1", "override=1"],
+    [
+        "include_restricted=true",
+        "license=personal_use_only",
+        "source=ercot",
+        "source=fred",
+        "all=1",
+        "override=1",
+    ],
 )
 def test_no_query_parameter_widens_the_list(client: TestClient, query: str) -> None:
     body = client.get(f"/series?{query}").json()
     assert {s["code"] for s in body["series"]} == PERMITTED
 
 
-@pytest.mark.parametrize("code", ["ERCOT_SERIES_TEST", "Eia_Override_Test", "ercot_series_test "])
+@pytest.mark.parametrize(
+    "code",
+    [
+        "ERCOT_SERIES_TEST",
+        "Eia_Override_Test",
+        "ercot_series_test ",
+        "FRED_UST_10Y_TEST",
+        "Fred_Revised_Test",
+    ],
+)
 def test_code_variants_do_not_reach_hidden_series(client: TestClient, code: str) -> None:
     assert client.get(f"/series/{code}/observations").status_code == 404
+
+
+def test_the_sql_filter_itself_withholds_fred_code_variants(
+    factory: sessionmaker[Session], world: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    """'FRED' and ' fred\\t' are excluded in SQL, not only by the row check (no error logged)."""
+    with caplog.at_level(logging.ERROR, logger="marketpulse.api.repository"):
+        listed = {meta.code for meta, _ in DatabaseSeriesRepository(factory).list_series()}
+    assert listed == PERMITTED
+    assert "licensing filter" not in caplog.text
+
+
+def test_stored_fred_rows_are_never_served(client: TestClient) -> None:
+    """FRED rows exist in the database (current and revised) and never reach any response."""
+    codes = {"fred_ust_10y_test", "fred_revised_test", "fred_upper_test", "fred_spaced_test"}
+    assert codes.isdisjoint(by_code(client))
+    for code in sorted(codes):
+        for query in ("", "?as_of=2026-11-02T00:00:00Z", "?as_of=2026-11-07T00:00:00Z"):
+            assert client.get(f"/series/{code}/observations{query}").status_code == 404
+    metrics = client.get("/metrics").json()["series"]
+    assert {m["code"] for m in metrics}.isdisjoint(codes)
+    assert {m["source"]["code"] for m in metrics}.isdisjoint({"ercot", "fred"})
+
+
+def test_the_repository_never_returns_fred_metadata(
+    factory: sessionmaker[Session], world: None
+) -> None:
+    repository = DatabaseSeriesRepository(factory)
+    listed = {meta.code for meta, _ in repository.list_series()}
+    assert listed == PERMITTED
+    assert repository.get_series("fred_ust_10y_test") is None
+    assert repository.get_series("fred_revised_test") is None
 
 
 # --- metadata, latest observation, freshness ------------------------------------------------------
@@ -218,9 +293,9 @@ def test_latest_is_the_current_version_with_a_value(client: TestClient) -> None:
         "first_retrieved_at": "2026-11-06T12:00:00Z",
         "last_confirmed_at": "2026-11-06T12:00:00Z",
     }
-    # FRED reported "." for Oct 29: the card shows Oct 28, the latest period with a value.
-    assert series["fred_daily_test"]["latest"]["period_end"] == "2026-10-28"
-    assert series["fred_daily_test"]["latest"]["value"] == "4.190"
+    # The provider reported no value for Oct 29: the card shows Oct 28, the latest with a value.
+    assert series["vintaged_daily_test"]["latest"]["period_end"] == "2026-10-28"
+    assert series["vintaged_daily_test"]["latest"]["value"] == "4.190"
 
 
 def test_freshness_uses_each_series_own_limit(client: TestClient) -> None:
@@ -233,9 +308,9 @@ def test_freshness_uses_each_series_own_limit(client: TestClient) -> None:
         "age_days": 9,
         "max_staleness_days": 14,
     }
-    daily = series["fred_daily_test"]["freshness"]
+    daily = series["vintaged_daily_test"]["freshness"]
     assert (daily["status"], daily["age_days"], daily["max_staleness_days"]) == ("stale", 11, 5)
-    empty = series["fred_empty_test"]
+    empty = series["vintaged_empty_test"]
     assert empty["latest"] is None
     assert empty["freshness"]["status"] == "unavailable"
 
@@ -271,7 +346,7 @@ def test_observations_are_current_versions_oldest_first(client: TestClient) -> N
 
 
 def test_missing_at_source_is_returned_as_missing_not_filled(client: TestClient) -> None:
-    body = client.get("/series/fred_daily_test/observations").json()
+    body = client.get("/series/vintaged_daily_test/observations").json()
     last = body["observations"][-1]
     assert (last["period_end"], last["value"], last["status"]) == (
         "2026-10-29",
@@ -346,7 +421,7 @@ def test_metrics_use_current_versions_only(client: TestClient) -> None:
 
 
 def test_metrics_do_not_fill_missing_observations(client: TestClient) -> None:
-    daily = metrics_by_code(client)["fred_daily_test"]
+    daily = metrics_by_code(client)["vintaged_daily_test"]
     # Oct 29 is missing at source: the latest valued observation (Oct 28) is described, and
     # nothing earlier was stored, so no change is computed.
     assert daily["current"]["period_end"] == "2026-10-28"
@@ -358,5 +433,5 @@ def test_metrics_do_not_fill_missing_observations(client: TestClient) -> None:
 
 
 def test_metrics_for_a_series_without_observations(client: TestClient) -> None:
-    empty = metrics_by_code(client)["fred_empty_test"]
+    empty = metrics_by_code(client)["vintaged_empty_test"]
     assert (empty["current"], empty["metrics"]) == (None, [])

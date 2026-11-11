@@ -3,6 +3,9 @@
 The FRED API is simulated (tests/fred_sim.py); everything else is the real pipeline: catalog,
 client, raw payload store on disk, ops.raw_payloads, the versioned writer, and run tracking.
 GDPC1 uses the real recorded revision history; other data is synthetic.
+
+FRED is retired and in the source block list. The job is kept, unreachable; these tests lift the
+block for their own process only (tests/source_block.py) to keep the dormant code tested.
 """
 
 import logging
@@ -45,6 +48,7 @@ from marketpulse.sources.fred.client import FredClient, ResponseHook
 from marketpulse.sources.fred.parse import parse_observations
 from marketpulse.sources.fred.versions import vintage_instant
 from marketpulse.sources.http import RetryPolicy
+from source_block import lift_fred_block
 
 CATALOG = load_catalog()
 SPECS = {s.code: s for s in CATALOG.series_for("fred")}
@@ -143,7 +147,10 @@ def make_client_factory(fake: FakeFred) -> Callable[[ResponseHook], FredClient]:
 
 
 @pytest.fixture
-def env(factory: sessionmaker[Session], tmp_path: Path) -> Env:
+def env(factory: sessionmaker[Session], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Env:
+    # TEST ONLY: FRED is blocked; these tests exercise the dormant job behind the block. The
+    # block itself, against this database, is tested in tests/db/test_source_guard_writes.py.
+    lift_fred_block(monkeypatch)
     with factory() as s, s.begin():
         sync_catalog(s, CATALOG)
     fake = FakeFred()

@@ -1,4 +1,10 @@
-"""The FRED series allowlist: a code constant that a catalog or the environment cannot widen."""
+"""The FRED series allowlist: a code constant that a catalog or the environment cannot widen.
+
+FRED is now in the source block list (tests/test_fred_source_block.py), which refuses first. The
+allowlist stays as a second, independent layer; tests that go through the job or the CLI lift
+the source block *in the test only* (`source_block_lifted`) to show that the allowlist would
+still refuse on its own.
+"""
 
 from typing import Any, cast
 
@@ -15,6 +21,7 @@ from marketpulse.ingestion.fred import (
 )
 from marketpulse.sources.catalog import Catalog, SeriesSpec, load_catalog
 from marketpulse.sources.catalog.schema import License
+from source_block import lift_fred_block
 
 CATALOG = load_catalog()
 SPECS = {spec.code: spec for spec in CATALOG.series_for("fred")}
@@ -34,6 +41,12 @@ def unlisted_spec() -> SeriesSpec:
 
 def with_unlisted_series() -> Catalog:
     return Catalog(sources=CATALOG.sources, series=(*CATALOG.series, ("fred", unlisted_spec())))
+
+
+@pytest.fixture
+def source_block_lifted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TEST ONLY: lift the FRED source block in this process to reach the allowlist layer."""
+    lift_fred_block(monkeypatch)
 
 
 def test_allowlist_matches_the_reviewed_catalog_exactly() -> None:
@@ -78,6 +91,7 @@ def test_the_per_series_guard_refuses_on_its_own() -> None:
         require_series_allowed(unlisted_spec())
 
 
+@pytest.mark.usefixtures("source_block_lifted")
 def test_the_guard_runs_before_any_database_or_provider_access() -> None:
     def no_client(_hook: object) -> Any:
         raise AssertionError("a client must not be created")
@@ -106,6 +120,7 @@ def test_the_environment_cannot_widen_the_allowlist(monkeypatch: pytest.MonkeyPa
         ["ingest", "fred", "--series", "sp500", "--full"],
     ],
 )
+@pytest.mark.usefixtures("source_block_lifted")
 def test_cli_arguments_cannot_request_an_unlisted_series(
     args: list[str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -116,6 +131,7 @@ def test_cli_arguments_cannot_request_an_unlisted_series(
     assert "not on the allowlist" in capsys.readouterr().out
 
 
+@pytest.mark.usefixtures("source_block_lifted")
 def test_the_cli_exits_1_when_a_catalog_series_is_not_allowed(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

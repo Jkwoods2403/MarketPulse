@@ -1,10 +1,12 @@
 """SYNTHETIC development API and API error handling (no database).
 
 The synthetic app serves generated fixtures only in development, labels every response, and
-applies the same licensing filter as the database API.
+applies the same licensing filter as the database API: restricted series and every series of a
+blocked source (ERCOT, FRED) are never served.
 """
 
 import calendar
+from dataclasses import replace
 from datetime import UTC, date, datetime
 
 import pytest
@@ -12,8 +14,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import OperationalError
 
 from marketpulse.api.main import create_app
+from marketpulse.api.schemas import SourceInfo
+from marketpulse.api.synthetic import SyntheticSeriesRepository
 from marketpulse.core.config import Environment, Settings
-from marketpulse.dev_app import SyntheticModeError, create_synthetic_app
+from marketpulse.core.source_access import INGESTION_BLOCKED_SOURCES
+from marketpulse.dev_app import SyntheticModeError, catalog_metas, create_synthetic_app
 from marketpulse.sources.catalog import load_catalog
 
 NOW = datetime(2026, 11, 8, 15, 0, tzinfo=UTC)
@@ -23,6 +28,16 @@ RESTRICTED = {
     for source, spec in CATALOG.series
     if (spec.license_override or CATALOG.sources[source].license).value == "personal_use_only"
 }
+BLOCKED = {spec.code for source, spec in CATALOG.series if source in INGESTION_BLOCKED_SOURCES}
+FRED = {spec.code for spec in CATALOG.series_for("fred")}
+# A test-only, permitted source. Used solely to keep checking metric and period semantics that
+# today only FRED-shaped series exercise (daily rates, quarterly periods), without serving FRED.
+TEST_SOURCE = SourceInfo(
+    code="synthetic_test_source",
+    name="Synthetic test source (not a data provider)",
+    attribution=None,
+    terms_url=None,
+)
 
 
 def settings(env: Environment) -> Settings:
@@ -32,6 +47,17 @@ def settings(env: Environment) -> Settings:
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(create_synthetic_app(settings(Environment.DEVELOPMENT), now=NOW))
+
+
+@pytest.fixture
+def reattributed_client() -> TestClient:
+    """Synthetic app whose FRED-shaped series belong to TEST_SOURCE instead of FRED (test only)."""
+    metas = [
+        replace(meta, source=TEST_SOURCE) if meta.source.code == "fred" else meta
+        for meta in catalog_metas(CATALOG)
+    ]
+    repository = SyntheticSeriesRepository(metas, now=NOW)
+    return TestClient(create_app(settings(Environment.DEVELOPMENT), repository=repository))
 
 
 @pytest.mark.parametrize("env", [Environment.TEST, Environment.STAGING, Environment.PRODUCTION])
@@ -46,7 +72,7 @@ def test_every_response_is_labeled_synthetic(client: TestClient) -> None:
     assert body["data_mode"] == "synthetic"
     assert body["series"]
     assert all(s["synthetic"] is True for s in body["series"])
-    detail = client.get("/series/ust_10y/observations").json()
+    detail = client.get("/series/l48_gas_storage/observations").json()
     assert detail["data_mode"] == "synthetic"
     assert detail["series"]["synthetic"] is True
 
@@ -55,10 +81,14 @@ def test_restricted_series_and_blocked_sources_are_not_served(client: TestClient
     assert {"wti_spot", "brent_spot", "henry_hub_spot"} == RESTRICTED
     codes = {s["code"] for s in client.get("/series").json()["series"]}
     assert codes.isdisjoint(RESTRICTED)
-    assert all(s["source"]["code"] != "ercot" for s in client.get("/series").json()["series"])
-    permitted = {spec.code for _, spec in CATALOG.series} - RESTRICTED
+    assert {"ercot", "fred"} <= set(INGESTION_BLOCKED_SOURCES)
+    assert FRED and FRED <= BLOCKED
+    assert codes.isdisjoint(BLOCKED)
+    sources = {s["source"]["code"] for s in client.get("/series").json()["series"]}
+    assert sources.isdisjoint({"ercot", "fred"})
+    permitted = {spec.code for _, spec in CATALOG.series} - RESTRICTED - BLOCKED
     assert codes == permitted
-    for code in sorted(RESTRICTED):
+    for code in sorted(RESTRICTED | BLOCKED):
         response = client.get(f"/series/{code}/observations")
         assert response.status_code == 404
         assert response.json() == {"detail": "series not found"}
@@ -73,14 +103,14 @@ def test_synthetic_values_are_deterministic_and_obviously_not_real(client: TestC
     assert all(80 < float(v) < 125 for v in first.values())
 
 
-def test_synthetic_periods_follow_catalog_conventions(client: TestClient) -> None:
-    series = {s["code"]: s for s in client.get("/series").json()["series"]}
+def test_synthetic_periods_follow_catalog_conventions(reattributed_client: TestClient) -> None:
+    series = {s["code"]: s for s in reattributed_client.get("/series").json()["series"]}
     weekly = series["l48_gas_storage"]["latest"]
     assert weekly["period_end"] == weekly["source_period"]
     assert date.fromisoformat(weekly["period_end"]).weekday() == calendar.FRIDAY
     monthly = series["us_lng_exports"]["latest"]
     assert monthly["period_start"].endswith("-01")
-    quarterly = series["real_gdp"]["latest"]
+    quarterly = series["real_gdp"]["latest"]  # FRED-shaped metadata under TEST_SOURCE
     assert "-Q" in quarterly["source_period"]
 
 
@@ -117,12 +147,13 @@ def test_synthetic_metrics_exclude_restricted_and_blocked_series(client: TestCli
     series = client.get("/metrics").json()["series"]
     codes = {s["code"] for s in series}
     assert codes.isdisjoint(RESTRICTED)
+    assert codes.isdisjoint(BLOCKED)
     assert codes == {s["code"] for s in client.get("/series").json()["series"]}
-    assert all(s["source"]["code"] != "ercot" for s in series)
+    assert {s["source"]["code"] for s in series}.isdisjoint({"ercot", "fred"})
 
 
-def test_metric_plans_follow_series_semantics(client: TestClient) -> None:
-    series = {s["code"]: s for s in client.get("/metrics").json()["series"]}
+def test_metric_plans_follow_series_semantics(reattributed_client: TestClient) -> None:
+    series = {s["code"]: s for s in reattributed_client.get("/metrics").json()["series"]}
     kinds = {code: [m["kind"] for m in s["metrics"]] for code, s in series.items()}
     assert kinds["l48_gas_storage"] == [
         "period_change",
@@ -132,7 +163,8 @@ def test_metric_plans_follow_series_semantics(client: TestClient) -> None:
     ]
     assert kinds["us_crude_stocks_spr"] == ["period_change", "year_over_year", "trailing_extremes"]
     assert kinds["us_lng_exports"] == ["period_change", "year_over_year", "seasonal_range"]
-    # Interest rates: percentage points and basis points, never a percent change of a percent.
+    # Interest rates (FRED-shaped metadata under TEST_SOURCE): percentage points and basis
+    # points, never a percent change of a percent.
     ten = series["ust_10y"]["metrics"][0]
     assert ten["change_units"] == "percentage points"
     assert ten["percent_change"] is None

@@ -305,6 +305,22 @@ def _probe_eia_command(series: list[str] | None) -> int:
 
 
 def _ingest_fred_command(series: list[str] | None, *, full: bool) -> int:
+    """Refuse FRED ingestion before settings, a database, or a client are created.
+
+    FRED is in the source block list (core/source_access.py); no option lifts it. The job below
+    is kept, unreachable, and refuses on its own as well (ingestion.fred.ingest_fred).
+    """
+    from marketpulse.core.source_access import (
+        SourceIngestionBlockedError,
+        require_source_ingestion_permitted,
+    )
+
+    try:
+        require_source_ingestion_permitted("fred")
+    except SourceIngestionBlockedError as exc:
+        print(f"error: {exc}")
+        return 1
+
     from marketpulse.core.config import get_settings
     from marketpulse.db.session import make_engine, make_session_factory
     from marketpulse.ingestion.fred import FredIngestionConfigError, ingest_fred

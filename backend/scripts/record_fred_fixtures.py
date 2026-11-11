@@ -1,5 +1,9 @@
 """Record small, real FRED API responses as test fixtures.
 
+RETIRED: FRED is no longer a Market Pulse data provider and is in the source block list
+(core/source_access.py). This script now exits 1 before reading settings, creating an HTTP
+client, making a request, or writing a file. The fixtures it recorded earlier are kept.
+
 Usage (from backend/):  uv run python scripts/record_fred_fixtures.py
 
 - Makes 10 small read-only requests (see REQUESTS) using FRED_API_KEY from the environment/.env.
@@ -20,6 +24,10 @@ from pathlib import Path
 
 from marketpulse.core.config import get_settings
 from marketpulse.core.ratelimit import RateLimiter
+from marketpulse.core.source_access import (
+    SourceIngestionBlockedError,
+    require_source_ingestion_permitted,
+)
 from marketpulse.sources.http import (
     ProviderClientConfig,
     ProviderHttpClient,
@@ -70,6 +78,13 @@ REQUESTS: list[tuple[str, str, dict[str, str], str]] = [
 
 
 def main() -> int:
+    # FRED is retired and blocked (core/source_access.py): refuse before settings, an HTTP
+    # client, a request, or any fixture file. The existing fixtures are kept unchanged.
+    try:
+        require_source_ingestion_permitted("fred")
+    except SourceIngestionBlockedError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     settings = get_settings()
     if settings.fred_api_key is None:
         print("FRED_API_KEY is not set", file=sys.stderr)

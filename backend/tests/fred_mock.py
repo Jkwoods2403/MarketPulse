@@ -15,6 +15,7 @@ from pydantic import SecretStr
 from marketpulse.core.ratelimit import RateLimiter
 from marketpulse.sources.fred.client import FredClient
 from marketpulse.sources.http import FetchResult, RetryPolicy
+from source_block import with_fred_block_lifted
 
 FIXTURES = Path(__file__).parent / "fixtures" / "fred"
 TEST_KEY = "TEST-FRED-KEY-0f9e8d7c6b5a4f3e"  # synthetic; FRED keys are 32 lowercase hex chars
@@ -61,14 +62,18 @@ class FredHarness:
             self.requests.append(request)
             return handler(request)
 
-        self.client = FredClient(
-            SecretStr(TEST_KEY),
-            user_agent="MarketPulse-tests/0.1",
-            rate_limiter=self.limiter,
-            retry=retry or RetryPolicy(max_attempts=3),
-            on_response=lambda dataset, result: self.raw.append((dataset, result)),
-            transport=httpx.MockTransport(record),
-            sleep=self.sleeps.append,
+        # TEST ONLY: FRED is blocked; the block is lifted just for constructing this mock-wired
+        # client (tests/source_block.py). Every request goes to the mock transport.
+        self.client = with_fred_block_lifted(
+            lambda: FredClient(
+                SecretStr(TEST_KEY),
+                user_agent="MarketPulse-tests/0.1",
+                rate_limiter=self.limiter,
+                retry=retry or RetryPolicy(max_attempts=3),
+                on_response=lambda dataset, result: self.raw.append((dataset, result)),
+                transport=httpx.MockTransport(record),
+                sleep=self.sleeps.append,
+            )
         )
 
     def params(self, i: int = -1) -> dict[str, str]:
