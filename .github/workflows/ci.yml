@@ -73,9 +73,11 @@ jobs:
       - name: Tests
         run: uv run pytest -W error
       # Negative check on the same disposable service: a session with the WRONG token must fail
-      # hard at the marker check, before any DROP or CREATE. MARKETPULSE_REQUIRE_DB is unset here,
-      # so only that check can turn the run into a failure instead of a skip. A sentinel test
-      # database (same OID, row intact afterwards) proves nothing was dropped or recreated.
+      # hard at the marker check, before any DROP or CREATE. MARKETPULSE_REQUIRE_DB is unset for
+      # that session, so only the marker check can turn it into a failure instead of a skip. The
+      # sentinel is the exact database that session's fixture would drop and recreate
+      # (<POSTGRES_DB>_test, asked from tests/isolation.py); the same OID and row afterwards prove
+      # nothing was dropped or recreated.
       - name: Wrong disposable-server token fails hard before any DROP or CREATE
         if: ${{ !cancelled() }}
         env:
@@ -85,19 +87,25 @@ jobs:
           fail() { echo "::error::$1"; exit 1; }
           # psql inside the service container (local socket: no password involved)
           sql() { docker exec "$PG_CONTAINER" psql -U "$POSTGRES_USER" -d "$1" -v ON_ERROR_STOP=1 -qtAc "$2"; }
+          neg_db="negcheck"  # the wrong-token session's POSTGRES_DB
+          target="$(uv run python -c 'import sys; sys.path.insert(0, "tests"); from isolation import as_test_database; print(as_test_database(sys.argv[1]))' "$neg_db")"
+          [ "$target" = "${neg_db}_test" ] || fail "unexpected fixture target: ${target}"
           wrong="nx${MARKETPULSE_TEST_DB_TOKEN}"  # well-formed, but never this server's token
           echo "::add-mask::${wrong}"
-          sql postgres "DROP DATABASE IF EXISTS negcheck_test"
-          sql postgres "CREATE DATABASE negcheck_test"
-          sql negcheck_test "CREATE TABLE sentinel (v int); INSERT INTO sentinel VALUES (42)"
-          oid_before="$(sql postgres "SELECT oid FROM pg_database WHERE datname = 'negcheck_test'")"
+          trap 'sql postgres "DROP DATABASE IF EXISTS ${target}" >/dev/null 2>&1 || true' EXIT
+          sql postgres "DROP DATABASE IF EXISTS ${target}"
+          sql postgres "CREATE DATABASE ${target}"
+          sql "$target" "CREATE TABLE sentinel (v int); INSERT INTO sentinel VALUES (42)"
+          oid_before="$(sql postgres "SELECT oid FROM pg_database WHERE datname = '${target}'")"
+          [ -n "$oid_before" ] || fail "the sentinel database was not created"
           set +e
-          MARKETPULSE_TEST_DB_TOKEN="$wrong" POSTGRES_DB=negcheck MARKETPULSE_REQUIRE_DB= \
+          env -u MARKETPULSE_REQUIRE_DB MARKETPULSE_TEST_DB_TOKEN="$wrong" POSTGRES_DB="$neg_db" \
             uv run pytest -q -p no:cacheprovider tests/db/test_constraints.py > negcheck.log 2>&1
           status=$?
           set -e
+          # sed reads all of its input (no SIGPIPE under pipefail, unlike head)
           { grep -E "not this session's disposable server|[0-9]+ (passed|failed|skipped|errors?)" \
-              negcheck.log || true; } | sort -u | head -n 5
+              negcheck.log || true; } | sort -u | sed -n '1,5p'
           echo "pytest exit status: ${status}"
           [ "$status" -ne 0 ] || fail "the wrong-token session did not fail"
           grep -q "not this session's disposable server" negcheck.log \
@@ -110,10 +118,12 @@ jobs:
           if grep -qF "$POSTGRES_PASSWORD" negcheck.log; then
             fail "the password appeared in the output"
           fi
-          oid_after="$(sql postgres "SELECT oid FROM pg_database WHERE datname = 'negcheck_test'")"
-          [ "$oid_after" = "$oid_before" ] || fail "negcheck_test was dropped or recreated"
-          [ "$(sql negcheck_test "SELECT v FROM sentinel")" = "42" ] || fail "sentinel row changed"
-          sql postgres "DROP DATABASE negcheck_test"
+          oid_after="$(sql postgres "SELECT oid FROM pg_database WHERE datname = '${target}'")"
+          [ "$oid_after" = "$oid_before" ] || fail "${target} was dropped or recreated"
+          [ "$(sql "$target" "SELECT v FROM sentinel")" = "42" ] || fail "sentinel row changed"
+          sql postgres "DROP DATABASE ${target}"
+          [ -z "$(sql postgres "SELECT 1 FROM pg_database WHERE datname = '${target}'")" ] \
+            || fail "the sentinel database was not removed"
           echo "wrong token: hard failure at the marker check; no DROP or CREATE ran"
 
   frontend:
